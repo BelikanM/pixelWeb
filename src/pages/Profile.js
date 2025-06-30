@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser } from 'react-icons/fa';
+import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane } from 'react-icons/fa';
 import './Profile.css';
 
 const API_URL = 'http://localhost:5000';
@@ -24,6 +24,7 @@ export default function Profile() {
   const [userId, setUserId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
+  const [verificationCode, setVerificationCode] = useState(''); // Nouveau pour le code
 
   // États données utilisateurs et médias
   const [users, setUsers] = useState([]);
@@ -71,6 +72,53 @@ export default function Profile() {
       setLoading(false);
     }
   }, [token]);
+
+  // Demander un nouveau code de vérification
+  const requestVerificationCode = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/request-verification`, {
+        method: 'POST',
+        headers: { authorization: token },
+      });
+      const data = await res.json();
+      setMessage(data.message || 'Erreur lors de la demande de code');
+    } catch {
+      setMessage('Erreur réseau lors de la demande de code');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  // Valider le code
+  const verifyCode = useCallback(async () => {
+    if (!token || !verificationCode.trim()) {
+      setMessage('Veuillez entrer un code');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', authorization: token },
+        body: JSON.stringify({ code: verificationCode }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIsVerified(true);
+        setVerificationCode('');
+        setMessage(data.message);
+        loadProfile(); // Recharger le profil pour mettre à jour isVerified
+      } else {
+        setMessage(data.message || 'Erreur lors de la vérification');
+      }
+    } catch {
+      setMessage('Erreur réseau lors de la vérification');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, verificationCode, loadProfile]);
 
   // Chargement utilisateurs
   const loadUsers = useCallback(async (q) => {
@@ -428,6 +476,7 @@ export default function Profile() {
     setUsername('');
     setEditUsername('');
     setIsVerified(false);
+    setVerificationCode('');
     setMessage('Déconnecté');
   }, []);
 
@@ -552,9 +601,44 @@ export default function Profile() {
           )}
 
           {!isVerified && (
-            <div className="alert alert-warning alert-dismissible fade show" role="alert">
-              Votre email n’est pas vérifié. Vérifiez votre boîte de réception pour activer votre compte.
-              <button type="button" className="btn-close" onClick={() => setMessage('')} aria-label="Fermer"></button>
+            <div className="card p-4 mb-4 bg-light text-dark rounded shadow-sm">
+              <h4 className="text-center mb-3">Vérifiez votre email</h4>
+              <p className="text-center text-muted">
+                Un code de vérification a été envoyé à votre email ({email}). Entrez le code ci-dessous pour activer votre compte.
+              </p>
+              <div className="input-group mb-3">
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Entrez le code à 6 chiffres"
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value)}
+                  maxLength="6"
+                  aria-label="Code de vérification"
+                />
+                <button
+                  className="btn btn-primary"
+                  onClick={verifyCode}
+                  disabled={loading || !verificationCode.trim()}
+                  aria-label="Vérifier le code"
+                >
+                  {loading ? (
+                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                  ) : (
+                    <>
+                      <FaPaperPlane className="me-1" /> Vérifier
+                    </>
+                  )}
+                </button>
+              </div>
+              <button
+                className="btn btn-link w-100"
+                onClick={requestVerificationCode}
+                disabled={loading}
+                aria-label="Renvoyer un code"
+              >
+                Renvoyer un nouveau code
+              </button>
             </div>
           )}
 

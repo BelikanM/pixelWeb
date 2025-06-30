@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -29,7 +28,9 @@ const userSchema = new mongoose.Schema({
   username: { type: String, default: '' },
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   isVerified: { type: Boolean, default: false },
-  verificationToken: { type: String }
+  verificationToken: { type: String },
+  verificationCode: { type: String }, // Nouveau champ pour le code
+  verificationCodeExpires: { type: Date } // Expiration du code
 });
 const User = mongoose.model('User', userSchema);
 
@@ -75,6 +76,11 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+// Générer un code de vérification à 6 chiffres
+const generateVerificationCode = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
 // Inscription
 app.post('/register', async (req, res) => {
   const { email, password, username } = req.body;
@@ -117,7 +123,70 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Vérification email
+// Demander un nouveau code de vérification
+app.post('/request-verification', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (user.isVerified) return res.status(400).json({ message: 'Compte déjà vérifié' });
+
+    const verificationCode = generateVerificationCode();
+    user.verificationCode = verificationCode;
+    user.verificationCodeExpires = Date.now() + 15 * 60 * 1000; // Expire dans 15 minutes
+    await user.save();
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: 'Votre code de vérification - Pixels Media',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #f9f9f9;">
+          <h2 style="color: #333;">Vérification de votre compte Pixels Media</h2>
+          <p style="color: #555;">Voici votre code de vérification :</p>
+          <div style="text-align: center; padding: 15px; background-color: #007bff; color: white; font-size: 24px; font-weight: bold; border-radius: 5px; margin: 20px 0;">
+            ${verificationCode}
+          </div>
+          <p style="color: #555;">Entrez ce code dans l'application pour vérifier votre compte. Ce code expire dans 15 minutes.</p>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    res.json({ message: 'Code de vérification envoyé à votre email.' });
+  } catch (error) {
+    console.error('Erreur /request-verification:', error);
+    res.status(500).json({ message: 'Erreur lors de l’envoi du code', error: error.message });
+  }
+});
+
+// Vérifier le code
+app.post('/verify-code', verifyToken, async (req, res) => {
+  const { code } = req.body;
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (user.isVerified) return res.status(400).json({ message: 'Compte déjà vérifié' });
+    if (!user.verificationCode || user.verificationCode !== code) {
+      return res.status(400).json({ message: 'Code invalide' });
+    }
+    if (user.verificationCodeExpires < Date.now()) {
+      return res.status(400).json({ message: 'Code expiré. Demandez un nouveau code.' });
+    }
+
+    user.isVerified = true;
+    user.verificationCode = undefined;
+    user.verificationCodeExpires = undefined;
+    user.verificationToken = undefined; // Supprimer aussi le token de lien si existant
+    await user.save();
+
+    res.json({ message: 'Compte vérifié avec succès.' });
+  } catch (error) {
+    console.error('Erreur /verify-code:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// Vérification email (inchangé)
 app.get('/verify-email', async (req, res) => {
   const { token } = req.query;
   try {
@@ -126,6 +195,8 @@ app.get('/verify-email', async (req, res) => {
 
     user.isVerified = true;
     user.verificationToken = undefined;
+    user.verificationCode = undefined;
+    user.verificationCodeExpires = undefined;
     await user.save();
 
     res.json({ message: 'Email vérifié avec succès. Vous pouvez maintenant vous connecter.' });
@@ -135,7 +206,7 @@ app.get('/verify-email', async (req, res) => {
   }
 });
 
-// Connexion
+// Connexion (inchangé)
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
@@ -146,10 +217,10 @@ app.post('/login', async (req, res) => {
   if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
 
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '2h' });
-  res.json({ token, user: { email: user.email, username: user.username } });
+  res.json({ token, user: { email: user.email, username: user.username, isVerified: user.isVerified } });
 });
 
-// Profil utilisateur
+// Profil utilisateur (modifié pour inclure isVerified)
 app.get('/profile', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('email username isVerified');
@@ -161,7 +232,7 @@ app.get('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Mettre à jour le profil
+// Mettre à jour le profil (inchangé)
 app.put('/profile', verifyToken, async (req, res) => {
   const { username } = req.body;
   if (!username || !username.trim()) {
@@ -187,7 +258,7 @@ app.put('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Upload média
+// Upload média (inchangé)
 app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Aucun fichier' });
   try {
@@ -206,7 +277,7 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
   }
 });
 
-// Feed des médias des abonnés
+// Feed des médias des abonnés (inchangé)
 app.get('/feed', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -221,7 +292,7 @@ app.get('/feed', verifyToken, async (req, res) => {
   }
 });
 
-// Liste des utilisateurs
+// Liste des utilisateurs (inchangé)
 app.get('/users', verifyToken, async (req, res) => {
   try {
     const q = req.query.q || '';
@@ -239,7 +310,7 @@ app.get('/users', verifyToken, async (req, res) => {
   }
 });
 
-// Liste des followings
+// Liste des followings (inchangé)
 app.get('/follows', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('following', 'email username');
@@ -250,7 +321,7 @@ app.get('/follows', verifyToken, async (req, res) => {
   }
 });
 
-// Suivre un utilisateur
+// Suivre un utilisateur (inchangé)
 app.post('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
@@ -265,7 +336,7 @@ app.post('/follow', verifyToken, async (req, res) => {
   }
 });
 
-// Ne plus suivre
+// Ne plus suivre (inchangé)
 app.delete('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
@@ -277,7 +348,7 @@ app.delete('/follow', verifyToken, async (req, res) => {
   }
 });
 
-// Récupérer ses propres médias
+// Récupérer ses propres médias (inchangé)
 app.get('/my-medias', verifyToken, async (req, res) => {
   try {
     const list = await Media.find({ owner: req.user.userId }).sort({ uploadedAt: -1 });
@@ -288,7 +359,7 @@ app.get('/my-medias', verifyToken, async (req, res) => {
   }
 });
 
-// Modifier le nom d’un fichier
+// Modifier le nom d’un fichier (inchangé)
 app.put('/media/:id', verifyToken, async (req, res) => {
   try {
     const media = await Media.findById(req.params.id);
@@ -303,7 +374,7 @@ app.put('/media/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Supprimer un fichier
+// Supprimer un fichier (inchangé)
 app.delete('/media/:id', verifyToken, async (req, res) => {
   try {
     const media = await Media.findById(req.params.id);
