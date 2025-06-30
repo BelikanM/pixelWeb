@@ -1,4 +1,4 @@
-// ✅ server.js
+// server.js
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -7,29 +7,33 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const cors = require('cors');
 const path = require('path');
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
 
-// ✅ Connexion MongoDB
+// Connexion MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
 }).then(() => console.log('✅ Connecté à MongoDB'))
   .catch(err => console.error('❌ Erreur MongoDB :', err.message));
 
-// ✅ Schéma utilisateur
+// Schéma utilisateur
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  username: { type: String, default: '' }, // Ajout du champ username
-  following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+  username: { type: String, default: '' },
+  following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  isVerified: { type: Boolean, default: false },
+  verificationToken: { type: String }
 });
 const User = mongoose.model('User', userSchema);
 
-// ✅ Schéma média
+// Schéma média
 const mediaSchema = new mongoose.Schema({
   filename: String,
   originalname: String,
@@ -38,7 +42,16 @@ const mediaSchema = new mongoose.Schema({
 });
 const Media = mongoose.model('Media', mediaSchema);
 
-// ✅ JWT
+// Configuration Nodemailer
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
+
+// JWT
 const JWT_SECRET = process.env.JWT_SECRET;
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization'];
@@ -52,7 +65,7 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// ✅ Multer config
+// Multer config
 const storage = multer.diskStorage({
   destination: 'Uploads/',
   filename: (req, file, cb) => {
@@ -62,67 +75,125 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ✅ Inscription
+// Inscription
 app.post('/register', async (req, res) => {
   const { email, password, username } = req.body;
   const existing = await User.findOne({ email });
   if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
+
+  const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+  if (username && !usernameRegex.test(username)) {
+    return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
+  }
+
   const hashed = await bcrypt.hash(password, 10);
+  const verificationToken = crypto.randomBytes(32).toString('hex');
   const user = await User.create({
     email,
     password: hashed,
-    username: username || email.split('@')[0] // Default username to email prefix
+    username: username || email.split('@')[0],
+    verificationToken
   });
-  res.status(201).json({ message: 'Utilisateur inscrit', user: { email: user.email, username: user.username } });
+
+  const verificationLink = `http://localhost:5000/verify-email?token=${verificationToken}`;
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'Vérifiez votre adresse email - Pixels Media',
+    html: `
+      <h2>Bienvenue sur Pixels Media !</h2>
+      <p>Veuillez vérifier votre adresse email en cliquant sur le lien suivant :</p>
+      <a href="${verificationLink}">Vérifier mon email</a>
+      <p>Ce lien expire dans 24 heures.</p>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    res.status(201).json({ message: 'Utilisateur inscrit. Vérifiez votre email pour activer votre compte.' });
+  } catch (error) {
+    console.error('Erreur envoi email:', error);
+    res.status(500).json({ message: 'Utilisateur inscrit, mais erreur lors de l’envoi de l’email de vérification.' });
+  }
 });
 
-// ✅ Connexion
+// Vérification email
+app.get('/verify-email', async (req, res) => {
+  const { token } = req.query;
+  try {
+    const user = await User.findOne({ verificationToken: token });
+    if (!user) return res.status(400).json({ message: 'Lien de vérification invalide ou expiré' });
+
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    await user.save();
+
+    res.json({ message: 'Email vérifié avec succès. Vous pouvez maintenant vous connecter.' });
+  } catch (error) {
+    console.error('Erreur /verify-email:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// Connexion
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
   if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+  if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email avant de vous connecter' });
+
   const isValid = await bcrypt.compare(password, user.password);
   if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
+
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '2h' });
   res.json({ token, user: { email: user.email, username: user.username } });
 });
 
-// ✅ Profil utilisateur
+// Profil utilisateur
 app.get('/profile', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('email username');
+    const user = await User.findById(req.user.userId).select('email username isVerified');
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    res.json({ email: user.email, username: user.username });
+    res.json({ email: user.email, username: user.username, isVerified: user.isVerified });
   } catch (error) {
     console.error('Erreur /profile:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// ✅ Mettre à jour le profil
+// Mettre à jour le profil
 app.put('/profile', verifyToken, async (req, res) => {
   const { username } = req.body;
   if (!username || !username.trim()) {
     return res.status(400).json({ message: 'Le nom d’utilisateur ne peut pas être vide' });
   }
+
+  const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+  if (!usernameRegex.test(username)) {
+    return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
+  }
+
   try {
     const user = await User.findByIdAndUpdate(
       req.user.userId,
       { username: username.trim() },
       { new: true, runValidators: true }
-    ).select('email username');
+    ).select('email username isVerified');
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    res.json({ message: 'Profil mis à jour', user: { email: user.email, username: user.username } });
+    res.json({ message: 'Profil mis à jour', user: { email: user.email, username: user.username, isVerified: user.isVerified } });
   } catch (error) {
     console.error('Erreur /profile PUT:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// ✅ Upload média
+// Upload média
 app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Aucun fichier' });
   try {
+    const user = await User.findById(req.user.userId);
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email avant d’uploader des fichiers' });
+
     const media = await Media.create({
       filename: req.file.filename,
       originalname: req.file.originalname,
@@ -135,7 +206,7 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
   }
 });
 
-// ✅ Feed des médias des abonnés
+// Feed des médias des abonnés
 app.get('/feed', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -150,7 +221,7 @@ app.get('/feed', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Liste des utilisateurs
+// Liste des utilisateurs
 app.get('/users', verifyToken, async (req, res) => {
   try {
     const q = req.query.q || '';
@@ -168,7 +239,7 @@ app.get('/users', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Liste des followings
+// Liste des followings
 app.get('/follows', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('following', 'email username');
@@ -179,16 +250,14 @@ app.get('/follows', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Suivre un utilisateur
+// Suivre un utilisateur
 app.post('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
-    const user = await User.findByIdAndUpdate(
-      req.user.userId,
-      { $addToSet: { following: followingId } },
-      { new: true }
-    );
-    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    const user = await User.findById(req.user.userId);
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email avant de suivre des utilisateurs' });
+
+    await User.findByIdAndUpdate(req.user.userId, { $addToSet: { following: followingId } });
     res.json({ message: 'Abonnement effectué' });
   } catch (error) {
     console.error('Erreur /follow:', error);
@@ -196,16 +265,11 @@ app.post('/follow', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Ne plus suivre
+// Ne plus suivre
 app.delete('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
-    const user = await User.findByIdAndUpdate(
-      req.user.userId,
-      { $pull: { following: followingId } },
-      { new: true }
-    );
-    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    await User.findByIdAndUpdate(req.user.userId, { $pull: { following: followingId } });
     res.json({ message: 'Désabonnement effectué' });
   } catch (error) {
     console.error('Erreur /follow DELETE:', error);
@@ -213,7 +277,7 @@ app.delete('/follow', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Récupérer ses propres médias
+// Récupérer ses propres médias
 app.get('/my-medias', verifyToken, async (req, res) => {
   try {
     const list = await Media.find({ owner: req.user.userId }).sort({ uploadedAt: -1 });
@@ -224,7 +288,7 @@ app.get('/my-medias', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Modifier le nom d’un fichier
+// Modifier le nom d’un fichier
 app.put('/media/:id', verifyToken, async (req, res) => {
   try {
     const media = await Media.findById(req.params.id);
@@ -239,7 +303,7 @@ app.put('/media/:id', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Supprimer un fichier
+// Supprimer un fichier
 app.delete('/media/:id', verifyToken, async (req, res) => {
   try {
     const media = await Media.findById(req.params.id);
@@ -253,6 +317,6 @@ app.delete('/media/:id', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Lancement serveur
+// Lancement serveur
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Serveur actif sur http://localhost:${PORT}`));

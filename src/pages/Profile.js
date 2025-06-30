@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser } from 'react-icons/fa';
-import './Profile.css'; // Fichier CSS personnalisé pour les styles supplémentaires
+import './Profile.css';
 
 const API_URL = 'http://localhost:5000';
 
@@ -23,6 +23,7 @@ export default function Profile() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [userId, setUserId] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
 
   // États données utilisateurs et médias
   const [users, setUsers] = useState([]);
@@ -51,14 +52,21 @@ export default function Profile() {
       });
       const data = await res.json();
       if (res.ok) {
-        setEmail(data.email);
+        setEmail(data.email || '');
         setUsername(data.username || '');
         setEditUsername(data.username || '');
+        setIsVerified(data.isVerified || false);
       } else {
         setMessage(data.message || 'Erreur chargement profil');
+        if (res.status === 404 || res.status === 403) {
+          localStorage.removeItem('token');
+          setToken(null);
+          setIsLogin(false);
+          setMessage('Session invalide, veuillez vous reconnecter');
+        }
       }
     } catch {
-      setMessage('Erreur chargement profil');
+      setMessage('Erreur réseau lors du chargement du profil');
     } finally {
       setLoading(false);
     }
@@ -66,7 +74,7 @@ export default function Profile() {
 
   // Chargement utilisateurs
   const loadUsers = useCallback(async (q) => {
-    if (!token) return;
+    if (!token || !isVerified) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/users?q=${encodeURIComponent(q)}`, {
@@ -80,11 +88,11 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, userId]);
+  }, [token, userId, isVerified]);
 
   // Chargement suivis
   const loadFollows = useCallback(async () => {
-    if (!token) return;
+    if (!token || !isVerified) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/follows`, { headers: { authorization: token } });
@@ -96,28 +104,27 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, isVerified]);
 
   // Charger feed
   const loadFeed = useCallback(async () => {
-    if (!token) return;
+    if (!token || !isVerified) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/feed`, { headers: { authorization: token } });
       const data = await res.json();
-      // Ensure feed is always an array
       setFeed(Array.isArray(data) ? data : []);
     } catch {
       setMessage('Erreur chargement fil');
-      setFeed([]); // Reset to empty array on error
+      setFeed([]);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, isVerified]);
 
   // Charger médias personnels
   const loadMyMedias = useCallback(async () => {
-    if (!token) return;
+    if (!token || !isVerified) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/my-medias`, { headers: { authorization: token } });
@@ -129,10 +136,14 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, isVerified]);
 
   // Suivre utilisateur
   const followUser = useCallback(async (id) => {
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant de suivre des utilisateurs');
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/follow`, {
@@ -153,10 +164,14 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, loadFollows, loadFeed]);
+  }, [token, loadFollows, loadFeed, isVerified]);
 
   // Ne plus suivre
   const unfollowUser = useCallback(async (id) => {
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant de modifier vos abonnements');
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/follow`, {
@@ -177,10 +192,14 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, loadFollows, loadFeed]);
+  }, [token, loadFollows, loadFeed, isVerified]);
 
   // Supprimer média
   const deleteMedia = useCallback(async (id) => {
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant de supprimer des médias');
+      return;
+    }
     if (!window.confirm('Supprimer ce média ?')) return;
     setLoading(true);
     try {
@@ -201,7 +220,7 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, loadMyMedias, loadFeed]);
+  }, [token, loadMyMedias, loadFeed, isVerified]);
 
   // Début édition nom média
   const startEditMedia = useCallback((media) => {
@@ -218,6 +237,10 @@ export default function Profile() {
   // Sauvegarder nouveau nom média
   const saveNewName = useCallback(
     async (id) => {
+      if (!isVerified) {
+        setMessage('Veuillez vérifier votre email avant de modifier des médias');
+        return;
+      }
       if (!newName.trim()) {
         setMessage('Le nom ne peut pas être vide');
         return;
@@ -245,13 +268,22 @@ export default function Profile() {
         setLoading(false);
       }
     },
-    [token, newName, loadMyMedias, loadFeed]
+    [token, newName, loadMyMedias, loadFeed, isVerified]
   );
 
   // Mettre à jour le profil
   const updateProfile = useCallback(async () => {
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant de modifier votre profil');
+      return;
+    }
     if (!editUsername.trim()) {
       setMessage('Le nom d’utilisateur ne peut pas être vide');
+      return;
+    }
+    const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+    if (!usernameRegex.test(editUsername)) {
+      setMessage('Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)');
       return;
     }
     setLoading(true);
@@ -265,21 +297,32 @@ export default function Profile() {
       if (res.ok) {
         setMessage(data.message);
         setUsername(data.user.username);
-        setEditUsername('');
+        setEditUsername(data.user.username);
+        setIsVerified(data.user.isVerified);
       } else {
         setMessage(data.message || 'Erreur mise à jour profil');
+        if (res.status === 404 || res.status === 403) {
+          localStorage.removeItem('token');
+          setToken(null);
+          setIsLogin(false);
+          setMessage('Session invalide, veuillez vous reconnecter');
+        }
       }
     } catch {
-      setMessage('Erreur mise à jour profil');
+      setMessage('Erreur réseau lors de la mise à jour du profil');
     } finally {
       setLoading(false);
     }
-  }, [token, editUsername]);
+  }, [token, editUsername, isVerified]);
 
   // Upload média
   const handleUpload = useCallback(
     async (e) => {
       e.preventDefault();
+      if (!isVerified) {
+        setMessage('Veuillez vérifier votre email avant d’uploader des fichiers');
+        return;
+      }
       if (!file) {
         setMessage('Choisis un fichier');
         return;
@@ -308,16 +351,20 @@ export default function Profile() {
         setLoading(false);
       }
     },
-    [token, file, loadFeed, loadMyMedias]
+    [token, file, loadFeed, loadMyMedias, isVerified]
   );
 
   // Recherche utilisateurs
   const handleSearchChange = useCallback(
     (e) => {
       setSearch(e.target.value);
-      loadUsers(e.target.value);
+      if (isVerified) {
+        loadUsers(e.target.value);
+      } else {
+        setMessage('Veuillez vérifier votre email pour rechercher des utilisateurs');
+      }
     },
-    [loadUsers]
+    [loadUsers, isVerified]
   );
 
   // Formulaire inscription / connexion
@@ -330,6 +377,13 @@ export default function Profile() {
         const body = isLogin
           ? { email, password }
           : { email, password, username: editUsername || email.split('@')[0] };
+        if (!isLogin && body.username) {
+          const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+          if (!usernameRegex.test(body.username)) {
+            setMessage('Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)');
+            return;
+          }
+        }
         const res = await fetch(`${API_URL}${endpoint}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -340,10 +394,17 @@ export default function Profile() {
         if (isLogin) {
           localStorage.setItem('token', data.token);
           setToken(data.token);
+          setEmail(data.user?.email || '');
+          setUsername(data.user?.username || '');
+          setEditUsername(data.user?.username || '');
+          setIsVerified(data.user?.isVerified || false);
           setMessage('Connecté avec succès !');
         } else {
-          setMessage('Inscription réussie, connecte-toi');
+          setMessage('Inscription réussie. Vérifiez votre email pour activer votre compte.');
           setIsLogin(true);
+          setEmail('');
+          setPassword('');
+          setEditUsername('');
         }
       } catch (err) {
         setMessage(`Erreur : ${err.message}`);
@@ -366,6 +427,7 @@ export default function Profile() {
     setEmail('');
     setUsername('');
     setEditUsername('');
+    setIsVerified(false);
     setMessage('Déconnecté');
   }, []);
 
@@ -377,14 +439,18 @@ export default function Profile() {
       setMessage('');
       setEmail('');
       setPassword('');
+      setUsername('');
+      setEditUsername('');
       setIsLogin(true);
       loadProfile();
-      loadFollows();
-      loadFeed();
-      loadMyMedias();
-      loadUsers('');
+      if (isVerified) {
+        loadFollows();
+        loadFeed();
+        loadMyMedias();
+        loadUsers('');
+      }
     }
-  }, [token, loadProfile, loadFollows, loadFeed, loadMyMedias, loadUsers]);
+  }, [token, loadProfile, loadFollows, loadFeed, loadMyMedias, loadUsers, isVerified]);
 
   return (
     <div className="container mt-4" style={{ maxWidth: 900 }}>
@@ -485,6 +551,13 @@ export default function Profile() {
             </div>
           )}
 
+          {!isVerified && (
+            <div className="alert alert-warning alert-dismissible fade show" role="alert">
+              Votre email n’est pas vérifié. Vérifiez votre boîte de réception pour activer votre compte.
+              <button type="button" className="btn-close" onClick={() => setMessage('')} aria-label="Fermer"></button>
+            </div>
+          )}
+
           {/* Gestion du profil */}
           <div className="card p-4 mb-4 bg-light text-dark rounded shadow-sm">
             <h4 className="text-center mb-3">Mon Profil</h4>
@@ -507,13 +580,14 @@ export default function Profile() {
                 className="form-control"
                 value={editUsername}
                 onChange={(e) => setEditUsername(e.target.value)}
+                disabled={!isVerified}
                 aria-label="Nom d’utilisateur"
               />
             </div>
             <button
               className="btn btn-primary w-100"
               onClick={updateProfile}
-              disabled={loading || !editUsername.trim()}
+              disabled={loading || !editUsername.trim() || !isVerified}
               aria-label="Mettre à jour le profil"
             >
               {loading ? (
@@ -522,195 +596,201 @@ export default function Profile() {
             </button>
           </div>
 
-          {/* Upload média */}
-          <form onSubmit={handleUpload} className="mb-4">
-            <div className="input-group">
-              <input
-                type="file"
-                accept="image/*,video/*,audio/*"
-                className="form-control"
-                onChange={(e) => setFile(e.target.files[0])}
-                aria-label="Sélectionner un fichier"
-              />
-              <button
-                className="btn btn-success"
-                type="submit"
-                disabled={loading}
-                aria-label="Uploader le fichier"
-              >
-                <FaUpload className="me-1" /> {loading ? 'Upload...' : 'Upload'}
-              </button>
-            </div>
-          </form>
+          {isVerified && (
+            <>
+              {/* Upload média */}
+              <form onSubmit={handleUpload} className="mb-4">
+                <div className="input-group">
+                  <input
+                    type="file"
+                    accept="image/*,video/*,audio/*"
+                    className="form-control"
+                    onChange={(e) => setFile(e.target.files[0])}
+                    disabled={!isVerified}
+                    aria-label="Sélectionner un fichier"
+                  />
+                  <button
+                    className="btn btn-success"
+                    type="submit"
+                    disabled={loading || !isVerified}
+                    aria-label="Uploader le fichier"
+                  >
+                    <FaUpload className="me-1" /> {loading ? 'Upload...' : 'Upload'}
+                  </button>
+                </div>
+              </form>
 
-          {/* Médias personnels */}
-          <h4 className="mb-3">Médias personnels</h4>
-          <div className="row">
-            {myMedias.length === 0 && <p className="text-muted">Aucun média uploadé.</p>}
-            {myMedias.map((media) => (
-              <div key={media._id} className="col-md-4 mb-3">
-                <div className="card h-100 shadow-sm hover-card">
-                  {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                    <img
-                      src={`${API_URL}/uploads/${media.filename}`}
-                      className="card-img-top"
-                      alt={media.originalname}
-                      style={{ objectFit: 'cover', height: '180px' }}
-                    />
-                  ) : (
-                    <video
-                      src={`${API_URL}/uploads/${media.filename}`}
-                      controls
-                      className="card-img-top"
-                      style={{ height: '180px', objectFit: 'cover' }}
-                    />
-                  )}
-                  <div className="card-body d-flex flex-column">
-                    {editMediaId === media._id ? (
-                      <>
-                        <input
-                          type="text"
-                          className="form-control mb-2"
-                          value={newName}
-                          onChange={(e) => setNewName(e.target.value)}
-                          aria-label="Nouveau nom du média"
+              {/* Médias personnels */}
+              <h4 className="mb-3">Médias personnels</h4>
+              <div className="row">
+                {myMedias.length === 0 && <p className="text-muted">Aucun média uploadé.</p>}
+                {myMedias.map((media) => (
+                  <div key={media._id} className="col-md-4 mb-3">
+                    <div className="card h-100 shadow-sm hover-card">
+                      {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                        <img
+                          src={`${API_URL}/uploads/${media.filename}`}
+                          className="card-img-top"
+                          alt={media.originalname}
+                          style={{ objectFit: 'cover', height: '180px' }}
                         />
-                        <div className="d-flex justify-content-between">
-                          <button
-                            className="btn btn-primary btn-sm"
-                            onClick={() => saveNewName(media._id)}
-                            disabled={loading}
-                            type="button"
-                            aria-label="Sauvegarder le nouveau nom"
-                          >
-                            <FaSave className="me-1" /> Sauvegarder
-                          </button>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={cancelEdit}
-                            disabled={loading}
-                            type="button"
-                            aria-label="Annuler l’édition"
-                          >
-                            <FaTimes className="me-1" /> Annuler
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
+                      ) : (
+                        <video
+                          src={`${API_URL}/uploads/${media.filename}`}
+                          controls
+                          className="card-img-top"
+                          style={{ height: '180px', objectFit: 'cover' }}
+                        />
+                      )}
+                      <div className="card-body d-flex flex-column">
+                        {editMediaId === media._id ? (
+                          <>
+                            <input
+                              type="text"
+                              className="form-control mb-2"
+                              value={newName}
+                              onChange={(e) => setNewName(e.target.value)}
+                              aria-label="Nouveau nom du média"
+                            />
+                            <div className="d-flex justify-content-between">
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => saveNewName(media._id)}
+                                disabled={loading || !isVerified}
+                                type="button"
+                                aria-label="Sauvegarder le nouveau nom"
+                              >
+                                <FaSave className="me-1" /> Sauvegarder
+                              </button>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={cancelEdit}
+                                disabled={loading}
+                                type="button"
+                                aria-label="Annuler l’édition"
+                              >
+                                <FaTimes className="me-1" /> Annuler
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <h5 className="card-title text-truncate">{media.originalname}</h5>
+                            <p className="card-text text-muted small">
+                              Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
+                            </p>
+                            <div className="mt-auto d-flex justify-content-between">
+                              <button
+                                className="btn btn-outline-warning btn-sm"
+                                onClick={() => startEditMedia(media)}
+                                disabled={loading || !isVerified}
+                                type="button"
+                                aria-label="Modifier le nom du média"
+                              >
+                                <FaEdit className="me-1" /> Modifier
+                              </button>
+                              <button
+                                className="btn btn-outline-danger btn-sm"
+                                onClick={() => deleteMedia(media._id)}
+                                disabled={loading || !isVerified}
+                                type="button"
+                                aria-label="Supprimer le média"
+                              >
+                                <FaTrash className="me-1" /> Supprimer
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Fil d'actualité médias suivis */}
+              <h4 className="mt-5 mb-3">Fil d’actualité</h4>
+              <div className="row">
+                {feed.length === 0 && <p className="text-muted">Aucun média dans votre fil.</p>}
+                {Array.isArray(feed) && feed.map((media) => (
+                  <div key={media._id} className="col-md-4 mb-3">
+                    <div className="card h-100 shadow-sm hover-card">
+                      {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                        <img
+                          src={`${API_URL}/uploads/${media.filename}`}
+                          className="card-img-top"
+                          alt={media.originalname}
+                          style={{ objectFit: 'cover', height: '180px' }}
+                        />
+                      ) : (
+                        <video
+                          src={`${API_URL}/uploads/${media.filename}`}
+                          controls
+                          className="card-img-top"
+                          style={{ height: '180px', objectFit: 'cover' }}
+                        />
+                      )}
+                      <div className="card-body">
                         <h5 className="card-title text-truncate">{media.originalname}</h5>
                         <p className="card-text text-muted small">
                           Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
                         </p>
-                        <div className="mt-auto d-flex justify-content-between">
-                          <button
-                            className="btn btn-outline-warning btn-sm"
-                            onClick={() => startEditMedia(media)}
-                            disabled={loading}
-                            type="button"
-                            aria-label="Modifier le nom du média"
-                          >
-                            <FaEdit className="me-1" /> Modifier
-                          </button>
-                          <button
-                            className="btn btn-outline-danger btn-sm"
-                            onClick={() => deleteMedia(media._id)}
-                            disabled={loading}
-                            type="button"
-                            aria-label="Supprimer le média"
-                          >
-                            <FaTrash className="me-1" /> Supprimer
-                          </button>
-                        </div>
-                      </>
-                    )}
+                        <p className="text-muted small">
+                          Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* Fil d'actualité médias suivis */}
-          <h4 className="mt-5 mb-3">Fil d’actualité</h4>
-          <div className="row">
-            {feed.length === 0 && <p className="text-muted">Aucun média dans votre fil.</p>}
-            {Array.isArray(feed) && feed.map((media) => (
-              <div key={media._id} className="col-md-4 mb-3">
-                <div className="card h-100 shadow-sm hover-card">
-                  {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                    <img
-                      src={`${API_URL}/uploads/${media.filename}`}
-                      className="card-img-top"
-                      alt={media.originalname}
-                      style={{ objectFit: 'cover', height: '180px' }}
-                    />
-                  ) : (
-                    <video
-                      src={`${API_URL}/uploads/${media.filename}`}
-                      controls
-                      className="card-img-top"
-                      style={{ height: '180px', objectFit: 'cover' }}
-                    />
-                  )}
-                  <div className="card-body">
-                    <h5 className="card-title text-truncate">{media.originalname}</h5>
-                    <p className="card-text text-muted small">
-                      Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
-                    </p>
-                    <p className="text-muted small">
-                      Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
-                    </p>
-                  </div>
-                </div>
+              {/* Liste utilisateurs avec recherche */}
+              <h4 className="mt-5 mb-3">Utilisateurs</h4>
+              <input
+                type="search"
+                className="form-control mb-3"
+                placeholder="Rechercher par email ou nom d’utilisateur"
+                value={search}
+                onChange={handleSearchChange}
+                disabled={!isVerified}
+                aria-label="Rechercher un utilisateur"
+              />
+              <div className="list-group mb-5" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                {users.length === 0 && <p className="text-muted">Aucun utilisateur trouvé.</p>}
+                {users.map((user) => {
+                  const isFollowing = follows.includes(user._id);
+                  return (
+                    <div
+                      key={user._id}
+                      className="list-group-item d-flex justify-content-between align-items-center hover-list-item"
+                    >
+                      <span>
+                        {user.username ? `${user.username} (${user.email})` : user.email}
+                      </span>
+                      {isFollowing ? (
+                        <button
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => unfollowUser(user._id)}
+                          disabled={loading || !isVerified}
+                          aria-label={`Ne plus suivre ${user.username || user.email}`}
+                        >
+                          <FaUserCheck className="me-1" /> Ne plus suivre
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => followUser(user._id)}
+                          disabled={loading || !isVerified}
+                          aria-label={`Suivre ${user.username || user.email}`}
+                        >
+                          <FaUserPlus className="me-1" /> Suivre
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-
-          {/* Liste utilisateurs avec recherche */}
-          <h4 className="mt-5 mb-3">Utilisateurs</h4>
-          <input
-            type="search"
-            className="form-control mb-3"
-            placeholder="Rechercher par email ou nom d’utilisateur"
-            value={search}
-            onChange={handleSearchChange}
-            aria-label="Rechercher un utilisateur"
-          />
-          <div className="list-group mb-5" style={{ maxHeight: '250px', overflowY: 'auto' }}>
-            {users.length === 0 && <p className="text-muted">Aucun utilisateur trouvé.</p>}
-            {users.map((user) => {
-              const isFollowing = follows.includes(user._id);
-              return (
-                <div
-                  key={user._id}
-                  className="list-group-item d-flex justify-content-between align-items-center hover-list-item"
-                >
-                  <span>
-                    {user.username ? `${user.username} (${user.email})` : user.email}
-                  </span>
-                  {isFollowing ? (
-                    <button
-                      className="btn btn-sm btn-outline-danger"
-                      onClick={() => unfollowUser(user._id)}
-                      disabled={loading}
-                      aria-label={`Ne plus suivre ${user.username || user.email}`}
-                    >
-                      <FaUserCheck className="me-1" /> Ne plus suivre
-                    </button>
-                  ) : (
-                    <button
-                      className="btn btn-sm btn-outline-primary"
-                      onClick={() => followUser(user._id)}
-                      disabled={loading}
-                      aria-label={`Suivre ${user.username || user.email}`}
-                    >
-                      <FaUserPlus className="me-1" /> Suivre
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+            </>
+          )}
         </>
       )}
     </div>
