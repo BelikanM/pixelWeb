@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
+import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes } from 'react-icons/fa';
 
 const API_URL = 'http://localhost:5000';
 
@@ -12,6 +13,7 @@ function parseJwt(token) {
 }
 
 export default function Profile() {
+  // États auth
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -19,13 +21,21 @@ export default function Profile() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [userId, setUserId] = useState(null);
 
+  // États données utilisateurs et médias
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [follows, setFollows] = useState([]);
   const [feed, setFeed] = useState([]);
+  const [myMedias, setMyMedias] = useState([]);
 
+  // Upload
   const [file, setFile] = useState(null);
 
+  // Pour modification nom média
+  const [editMediaId, setEditMediaId] = useState(null);
+  const [newName, setNewName] = useState('');
+
+  // Décodage token + chargement initial
   useEffect(() => {
     if (token) {
       const decoded = parseJwt(token);
@@ -36,10 +46,12 @@ export default function Profile() {
       setIsLogin(true);
       loadFollows();
       loadFeed();
+      loadMyMedias();
       loadUsers('');
     }
   }, [token]);
 
+  // Chargement utilisateurs
   const loadUsers = async (q) => {
     if (!token) return;
     try {
@@ -53,11 +65,11 @@ export default function Profile() {
     }
   };
 
+  // Chargement suivis
   const loadFollows = async () => {
+    if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/follows`, {
-        headers: { authorization: token }
-      });
+      const res = await fetch(`${API_URL}/follows`, { headers: { authorization: token } });
       const data = await res.json();
       setFollows(data.map(u => u._id));
     } catch {
@@ -65,14 +77,12 @@ export default function Profile() {
     }
   };
 
+  // Suivre utilisateur
   const followUser = async (id) => {
     try {
       const res = await fetch(`${API_URL}/follow`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          authorization: token
-        },
+        headers: { 'Content-Type': 'application/json', authorization: token },
         body: JSON.stringify({ followingId: id })
       });
       const data = await res.json();
@@ -88,14 +98,12 @@ export default function Profile() {
     }
   };
 
+  // Ne plus suivre
   const unfollowUser = async (id) => {
     try {
       const res = await fetch(`${API_URL}/follow`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          authorization: token
-        },
+        headers: { 'Content-Type': 'application/json', authorization: token },
         body: JSON.stringify({ followingId: id })
       });
       const data = await res.json();
@@ -111,12 +119,11 @@ export default function Profile() {
     }
   };
 
+  // Charger feed (médias abonnés)
   const loadFeed = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/feed`, {
-        headers: { authorization: token }
-      });
+      const res = await fetch(`${API_URL}/feed`, { headers: { authorization: token } });
       const data = await res.json();
       setFeed(data);
     } catch {
@@ -124,9 +131,119 @@ export default function Profile() {
     }
   };
 
+  // Charger médias personnels
+  const loadMyMedias = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/my-medias`, { headers: { authorization: token } });
+      const data = await res.json();
+      setMyMedias(data);
+    } catch {
+      setMessage('Erreur chargement médias');
+    }
+  };
+
+  // Supprimer média
+  const deleteMedia = async (id) => {
+    if (!window.confirm('Supprimer ce média ?')) return;
+    try {
+      const res = await fetch(`${API_URL}/media/${id}`, {
+        method: 'DELETE',
+        headers: { authorization: token }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        loadMyMedias();
+        loadFeed();
+      } else {
+        setMessage(data.message || 'Erreur suppression');
+      }
+    } catch {
+      setMessage('Erreur suppression');
+    }
+  };
+
+  // Début édition nom média
+  const startEditMedia = (media) => {
+    setEditMediaId(media._id);
+    setNewName(media.originalname);
+  };
+
+  // Annuler édition nom média
+  const cancelEdit = () => {
+    setEditMediaId(null);
+    setNewName('');
+  };
+
+  // Sauvegarder nouveau nom média
+  const saveNewName = async (id) => {
+    if (!newName.trim()) {
+      setMessage('Le nom ne peut pas être vide');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/media/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', authorization: token },
+        body: JSON.stringify({ originalname: newName })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        setEditMediaId(null);
+        setNewName('');
+        loadMyMedias();
+        loadFeed();
+      } else {
+        setMessage(data.message || 'Erreur mise à jour');
+      }
+    } catch {
+      setMessage('Erreur mise à jour');
+    }
+  };
+
+  // Upload média
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!file) {
+      setMessage('Choisis un fichier');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('media', file);
+
+    try {
+      const res = await fetch(`${API_URL}/upload`, {
+        method: 'POST',
+        headers: { authorization: token },
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        setFile(null);
+        loadFeed();
+        loadMyMedias();
+      } else {
+        setMessage(data.message || 'Erreur upload');
+      }
+    } catch {
+      setMessage('Erreur upload');
+    }
+  };
+
+  // Recherche utilisateurs
+  const handleSearchChange = (e) => {
+    setSearch(e.target.value);
+    loadUsers(e.target.value);
+  };
+
+  // Formulaire inscription / connexion
   const handleSubmit = async (e) => {
     e.preventDefault();
     const endpoint = isLogin ? '/login' : '/register';
+
     try {
       const res = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
@@ -149,6 +266,7 @@ export default function Profile() {
     }
   };
 
+  // Déconnexion
   const handleLogout = () => {
     localStorage.removeItem('token');
     setToken(null);
@@ -156,40 +274,13 @@ export default function Profile() {
     setUsers([]);
     setFollows([]);
     setFeed([]);
+    setMyMedias([]);
     setMessage('Déconnecté');
-  };
-
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!file) {
-      setMessage('Choisis un fichier');
-      return;
-    }
-    const formData = new FormData();
-    formData.append('media', file);
-
-    try {
-      const res = await fetch(`${API_URL}/upload`, {
-        method: 'POST',
-        headers: { authorization: token },
-        body: formData
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMessage(data.message);
-        setFile(null);
-        loadFeed();
-      } else {
-        setMessage(data.message || 'Erreur upload');
-      }
-    } catch {
-      setMessage('Erreur upload');
-    }
   };
 
   return (
     <div className="container mt-4" style={{ maxWidth: 900 }}>
-      <h1 className="mb-4 text-center">Pixels Media - Profile</h1>
+      <h1 className="mb-4 text-center">Pixels Media - Profil</h1>
 
       {!token ? (
         <div className="card p-4 bg-light text-dark rounded">
@@ -229,71 +320,178 @@ export default function Profile() {
       ) : (
         <>
           <div className="d-flex justify-content-between align-items-center mb-3">
-            <h3>Bienvenue</h3>
+            <h3>Bonjour, {email || 'Utilisateur'}</h3>
             <button className="btn btn-danger" onClick={handleLogout}>
-              Déconnexion
+              <FaSignOutAlt /> Déconnexion
             </button>
           </div>
 
           {message && <div className="alert alert-info">{message}</div>}
 
-          <form className="mb-4" onSubmit={handleUpload}>
-            <div className="mb-3">
-              <label className="form-label">Uploader un fichier média</label>
+          {/* Upload média */}
+          <form onSubmit={handleUpload} className="mb-4">
+            <div className="input-group">
               <input
                 type="file"
+                accept="image/*,video/*,audio/*"
                 className="form-control"
                 onChange={e => setFile(e.target.files[0])}
               />
+              <button className="btn btn-success" type="submit">
+                <FaUpload /> Upload
+              </button>
             </div>
-            <button className="btn btn-success" type="submit">Envoyer</button>
           </form>
 
-          <div className="mb-4">
-            <h4>🔍 Rechercher des utilisateurs</h4>
-            <input
-              type="text"
-              className="form-control mb-2"
-              placeholder="Recherche..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                loadUsers(e.target.value);
-              }}
-            />
-            {users.map((user) => (
-              <div key={user._id} className="d-flex justify-content-between align-items-center border p-2 rounded mb-2">
-                <span>{user.email}</span>
-                {follows.includes(user._id) ? (
-                  <button className="btn btn-outline-danger btn-sm" onClick={() => unfollowUser(user._id)}>Ne plus suivre</button>
-                ) : (
-                  <button className="btn btn-outline-primary btn-sm" onClick={() => followUser(user._id)}>Suivre</button>
-                )}
+          {/* Médias personnels */}
+          <h4>Médias personnels</h4>
+          <div className="row">
+            {myMedias.length === 0 && <p>Aucun média uploadé.</p>}
+            {myMedias.map(media => (
+              <div key={media._id} className="col-md-4 mb-3">
+                <div className="card h-100 shadow-sm">
+                  {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                    <img
+                      src={`${API_URL}/uploads/${media.filename}`}
+                      className="card-img-top"
+                      alt={media.originalname}
+                      style={{ objectFit: 'cover', height: '180px' }}
+                    />
+                  ) : (
+                    <video
+                      src={`${API_URL}/uploads/${media.filename}`}
+                      controls
+                      className="card-img-top"
+                      style={{ height: '180px', objectFit: 'cover' }}
+                    />
+                  )}
+                  <div className="card-body d-flex flex-column">
+                    {editMediaId === media._id ? (
+                      <>
+                        <input
+                          type="text"
+                          className="form-control mb-2"
+                          value={newName}
+                          onChange={e => setNewName(e.target.value)}
+                        />
+                        <div className="d-flex justify-content-between">
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => saveNewName(media._id)}
+                            type="button"
+                          >
+                            <FaSave /> Sauvegarder
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={cancelEdit}
+                            type="button"
+                          >
+                            <FaTimes /> Annuler
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <h5 className="card-title text-truncate">{media.originalname}</h5>
+                        <p className="card-text">
+                          Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
+                        </p>
+                        <div className="mt-auto d-flex justify-content-between">
+                          <button
+                            className="btn btn-warning btn-sm"
+                            onClick={() => startEditMedia(media)}
+                            type="button"
+                          >
+                            <FaEdit /> Modifier
+                          </button>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => deleteMedia(media._id)}
+                            type="button"
+                          >
+                            <FaTrash /> Supprimer
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </div>
 
-          <div className="mb-5">
-            <h4>📰 Fil d’actualité</h4>
-            {feed.length === 0 && <p>Aucun média disponible pour le moment.</p>}
-            {feed.map((media) => (
-              <div key={media._id} className="card mb-3">
-                <div className="card-body">
-                  <h6 className="card-title">Posté par : {media.owner?.email || 'Utilisateur'}</h6>
-                  <p className="card-text">
-                    <strong>Nom original :</strong> {media.originalname}
-                  </p>
-                  <a
-                    href={`http://localhost:5000/uploads/${media.filename}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn btn-outline-secondary btn-sm"
-                  >
-                    Ouvrir le fichier
-                  </a>
+          {/* Fil d'actualité médias suivis */}
+          <h4 className="mt-5">Fil d’actualité</h4>
+          <div className="row">
+            {feed.length === 0 && <p>Aucun média dans votre fil.</p>}
+            {feed.map(media => (
+              <div key={media._id} className="col-md-4 mb-3">
+                <div className="card h-100 shadow-sm">
+                  {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                    <img
+                      src={`${API_URL}/uploads/${media.filename}`}
+                      className="card-img-top"
+                      alt={media.originalname}
+                      style={{ objectFit: 'cover', height: '180px' }}
+                    />
+                  ) : (
+                    <video
+                      src={`${API_URL}/uploads/${media.filename}`}
+                      controls
+                      className="card-img-top"
+                      style={{ height: '180px', objectFit: 'cover' }}
+                    />
+                  )}
+                  <div className="card-body">
+                    <h5 className="card-title text-truncate">{media.originalname}</h5>
+                    <p className="card-text">
+                      Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
+                    </p>
+                    <p className="text-muted small">Par : {media.owner.email}</p>
+                  </div>
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Liste utilisateurs avec recherche */}
+          <h4 className="mt-5">Utilisateurs</h4>
+          <input
+            type="search"
+            className="form-control mb-3"
+            placeholder="Rechercher un utilisateur"
+            value={search}
+            onChange={handleSearchChange}
+          />
+          <div className="list-group mb-5" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+            {users.length === 0 && <p>Aucun utilisateur trouvé.</p>}
+            {users.map(user => {
+              const isFollowing = follows.includes(user._id);
+              return (
+                <div
+                  key={user._id}
+                  className="list-group-item d-flex justify-content-between align-items-center"
+                >
+                  <span>{user.email}</span>
+                  {isFollowing ? (
+                    <button
+                      className="btn btn-sm btn-outline-danger"
+                      onClick={() => unfollowUser(user._id)}
+                    >
+                      <FaUserCheck /> Ne plus suivre
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => followUser(user._id)}
+                    >
+                      <FaUserPlus /> Suivre
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </>
       )}
