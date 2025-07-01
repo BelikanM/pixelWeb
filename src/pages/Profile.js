@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane } from 'react-icons/fa';
 import './Profile.css';
@@ -14,7 +15,6 @@ function parseJwt(token) {
 }
 
 export default function Profile() {
-  // États auth
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
@@ -24,26 +24,20 @@ export default function Profile() {
   const [userId, setUserId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
-  const [verificationCode, setVerificationCode] = useState(''); // Nouveau pour le code
-
-  // États données utilisateurs et médias
+  const [role, setRole] = useState('user');
+  const [verificationCode, setVerificationCode] = useState('');
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [follows, setFollows] = useState([]);
-  const [feed, setFeed] = useState([]);
   const [myMedias, setMyMedias] = useState([]);
-
-  // Upload
   const [file, setFile] = useState(null);
-
-  // Modification nom média
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [editMediaId, setEditMediaId] = useState(null);
-  const [newName, setNewName] = useState('');
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const navigate = useNavigate();
 
-  // Modification profil
-  const [editUsername, setEditUsername] = useState('');
-
-  // Charger profil utilisateur
   const loadProfile = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -55,9 +49,10 @@ export default function Profile() {
       if (res.ok) {
         setEmail(data.email || '');
         setUsername(data.username || '');
-        setEditUsername(data.username || '');
         setIsVerified(data.isVerified || false);
+        setRole(data.role || 'user');
       } else {
+        console.error('Erreur chargement profil:', data.message);
         setMessage(data.message || 'Erreur chargement profil');
         if (res.status === 404 || res.status === 403) {
           localStorage.removeItem('token');
@@ -66,14 +61,14 @@ export default function Profile() {
           setMessage('Session invalide, veuillez vous reconnecter');
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('Erreur réseau profil:', err.message);
       setMessage('Erreur réseau lors du chargement du profil');
     } finally {
       setLoading(false);
     }
   }, [token]);
 
-  // Demander un nouveau code de vérification
   const requestVerificationCode = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -83,15 +78,20 @@ export default function Profile() {
         headers: { authorization: token },
       });
       const data = await res.json();
-      setMessage(data.message || 'Erreur lors de la demande de code');
-    } catch {
+      if (res.ok) {
+        setMessage(data.message);
+      } else {
+        console.error('Erreur demande code:', data.message);
+        setMessage(data.message || 'Erreur lors de la demande de code');
+      }
+    } catch (err) {
+      console.error('Erreur réseau demande code:', err.message);
       setMessage('Erreur réseau lors de la demande de code');
     } finally {
       setLoading(false);
     }
   }, [token]);
 
-  // Valider le code
   const verifyCode = useCallback(async () => {
     if (!token || !verificationCode.trim()) {
       setMessage('Veuillez entrer un code');
@@ -109,18 +109,20 @@ export default function Profile() {
         setIsVerified(true);
         setVerificationCode('');
         setMessage(data.message);
-        loadProfile(); // Recharger le profil pour mettre à jour isVerified
+        setRole(data.user.role);
+        loadProfile();
       } else {
+        console.error('Erreur vérification code:', data.message);
         setMessage(data.message || 'Erreur lors de la vérification');
       }
-    } catch {
+    } catch (err) {
+      console.error('Erreur réseau vérification:', err.message);
       setMessage('Erreur réseau lors de la vérification');
     } finally {
       setLoading(false);
     }
   }, [token, verificationCode, loadProfile]);
 
-  // Chargement utilisateurs
   const loadUsers = useCallback(async (q) => {
     if (!token || !isVerified) return;
     setLoading(true);
@@ -129,8 +131,14 @@ export default function Profile() {
         headers: { authorization: token },
       });
       const data = await res.json();
-      setUsers(Array.isArray(data) ? data.filter((u) => u._id !== userId) : []);
-    } catch {
+      if (Array.isArray(data)) {
+        setUsers(data.filter((u) => u._id !== userId));
+      } else {
+        console.error('Erreur utilisateurs: Données non valides', data);
+        setUsers([]);
+      }
+    } catch (err) {
+      console.error('Erreur chargement utilisateurs:', err.message);
       setMessage('Erreur chargement utilisateurs');
       setUsers([]);
     } finally {
@@ -138,15 +146,20 @@ export default function Profile() {
     }
   }, [token, userId, isVerified]);
 
-  // Chargement suivis
   const loadFollows = useCallback(async () => {
     if (!token || !isVerified) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/follows`, { headers: { authorization: token } });
       const data = await res.json();
-      setFollows(Array.isArray(data) ? data.map((u) => u._id) : []);
-    } catch {
+      if (Array.isArray(data)) {
+        setFollows(data);
+      } else {
+        console.error('Erreur suivis: Données non valides', data);
+        setFollows([]);
+      }
+    } catch (err) {
+      console.error('Erreur chargement suivis:', err.message);
       setMessage('Erreur chargement abonnements');
       setFollows([]);
     } finally {
@@ -154,31 +167,20 @@ export default function Profile() {
     }
   }, [token, isVerified]);
 
-  // Charger feed
-  const loadFeed = useCallback(async () => {
-    if (!token || !isVerified) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/feed`, { headers: { authorization: token } });
-      const data = await res.json();
-      setFeed(Array.isArray(data) ? data : []);
-    } catch {
-      setMessage('Erreur chargement fil');
-      setFeed([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, isVerified]);
-
-  // Charger médias personnels
   const loadMyMedias = useCallback(async () => {
     if (!token || !isVerified) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/my-medias`, { headers: { authorization: token } });
       const data = await res.json();
-      setMyMedias(Array.isArray(data) ? data : []);
-    } catch {
+      if (Array.isArray(data)) {
+        setMyMedias(data);
+      } else {
+        console.error('Erreur médias: Données non valides', data);
+        setMyMedias([]);
+      }
+    } catch (err) {
+      console.error('Erreur chargement médias:', err.message);
       setMessage('Erreur chargement médias');
       setMyMedias([]);
     } finally {
@@ -186,7 +188,6 @@ export default function Profile() {
     }
   }, [token, isVerified]);
 
-  // Suivre utilisateur
   const followUser = useCallback(async (id) => {
     if (!isVerified) {
       setMessage('Veuillez vérifier votre email avant de suivre des utilisateurs');
@@ -203,18 +204,18 @@ export default function Profile() {
       if (res.ok) {
         setMessage(data.message);
         loadFollows();
-        loadFeed();
       } else {
+        console.error('Erreur follow:', data.message);
         setMessage(data.message || 'Erreur follow');
       }
-    } catch {
+    } catch (err) {
+      console.error('Erreur réseau follow:', err.message);
       setMessage('Erreur follow');
     } finally {
       setLoading(false);
     }
-  }, [token, loadFollows, loadFeed, isVerified]);
+  }, [token, loadFollows, isVerified]);
 
-  // Ne plus suivre
   const unfollowUser = useCallback(async (id) => {
     if (!isVerified) {
       setMessage('Veuillez vérifier votre email avant de modifier vos abonnements');
@@ -231,18 +232,18 @@ export default function Profile() {
       if (res.ok) {
         setMessage(data.message);
         loadFollows();
-        loadFeed();
       } else {
+        console.error('Erreur unfollow:', data.message);
         setMessage(data.message || 'Erreur unfollow');
       }
-    } catch {
+    } catch (err) {
+      console.error('Erreur réseau unfollow:', err.message);
       setMessage('Erreur unfollow');
     } finally {
       setLoading(false);
     }
-  }, [token, loadFollows, loadFeed, isVerified]);
+  }, [token, loadFollows, isVerified]);
 
-  // Supprimer média
   const deleteMedia = useCallback(async (id) => {
     if (!isVerified) {
       setMessage('Veuillez vérifier votre email avant de supprimer des médias');
@@ -259,78 +260,76 @@ export default function Profile() {
       if (res.ok) {
         setMessage(data.message);
         loadMyMedias();
-        loadFeed();
       } else {
+        console.error('Erreur suppression média:', data.message);
         setMessage(data.message || 'Erreur suppression');
       }
-    } catch {
+    } catch (err) {
+      console.error('Erreur réseau suppression:', err.message);
       setMessage('Erreur suppression');
     } finally {
       setLoading(false);
     }
-  }, [token, loadMyMedias, loadFeed, isVerified]);
+  }, [token, loadMyMedias, isVerified]);
 
-  // Début édition nom média
   const startEditMedia = useCallback((media) => {
     setEditMediaId(media._id);
-    setNewName(media.originalname);
+    setEditTitle(media.originalname);
+    setEditDescription(media.description || '');
   }, []);
 
-  // Annuler édition nom média
   const cancelEdit = useCallback(() => {
     setEditMediaId(null);
-    setNewName('');
+    setEditTitle('');
+    setEditDescription('');
   }, []);
 
-  // Sauvegarder nouveau nom média
-  const saveNewName = useCallback(
-    async (id) => {
-      if (!isVerified) {
-        setMessage('Veuillez vérifier votre email avant de modifier des médias');
-        return;
+  const saveMediaEdits = useCallback(async (id) => {
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant de modifier des médias');
+      return;
+    }
+    if (!editTitle.trim()) {
+      setMessage('Le titre ne peut pas être vide');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/media/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', authorization: token },
+        body: JSON.stringify({ originalname: editTitle, description: editDescription }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        setEditMediaId(null);
+        setEditTitle('');
+        setEditDescription('');
+        loadMyMedias();
+      } else {
+        console.error('Erreur mise à jour média:', data.message);
+        setMessage(data.message || 'Erreur mise à jour');
       }
-      if (!newName.trim()) {
-        setMessage('Le nom ne peut pas être vide');
-        return;
-      }
-      setLoading(true);
-      try {
-        const res = await fetch(`${API_URL}/media/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', authorization: token },
-          body: JSON.stringify({ originalname: newName }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-          setMessage(data.message);
-          setEditMediaId(null);
-          setNewName('');
-          loadMyMedias();
-          loadFeed();
-        } else {
-          setMessage(data.message || 'Erreur mise à jour');
-        }
-      } catch {
-        setMessage('Erreur mise à jour');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [token, newName, loadMyMedias, loadFeed, isVerified]
-  );
+    } catch (err) {
+      console.error('Erreur réseau mise à jour:', err.message);
+      setMessage('Erreur mise à jour');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, editTitle, editDescription, loadMyMedias, isVerified]);
 
-  // Mettre à jour le profil
   const updateProfile = useCallback(async () => {
     if (!isVerified) {
       setMessage('Veuillez vérifier votre email avant de modifier votre profil');
       return;
     }
-    if (!editUsername.trim()) {
+    if (!username.trim()) {
       setMessage('Le nom d’utilisateur ne peut pas être vide');
       return;
     }
     const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
-    if (!usernameRegex.test(editUsername)) {
+    if (!usernameRegex.test(username)) {
       setMessage('Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)');
       return;
     }
@@ -339,15 +338,16 @@ export default function Profile() {
       const res = await fetch(`${API_URL}/profile`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', authorization: token },
-        body: JSON.stringify({ username: editUsername }),
+        body: JSON.stringify({ username }),
       });
       const data = await res.json();
       if (res.ok) {
         setMessage(data.message);
         setUsername(data.user.username);
-        setEditUsername(data.user.username);
         setIsVerified(data.user.isVerified);
+        setRole(data.user.role);
       } else {
+        console.error('Erreur mise à jour profil:', data.message);
         setMessage(data.message || 'Erreur mise à jour profil');
         if (res.status === 404 || res.status === 403) {
           localStorage.removeItem('token');
@@ -356,131 +356,131 @@ export default function Profile() {
           setMessage('Session invalide, veuillez vous reconnecter');
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('Erreur réseau mise à jour profil:', err.message);
       setMessage('Erreur réseau lors de la mise à jour du profil');
     } finally {
       setLoading(false);
     }
-  }, [token, editUsername, isVerified]);
+  }, [token, username, isVerified]);
 
-  // Upload média
-  const handleUpload = useCallback(
-    async (e) => {
-      e.preventDefault();
-      if (!isVerified) {
-        setMessage('Veuillez vérifier votre email avant d’uploader des fichiers');
-        return;
-      }
-      if (!file) {
-        setMessage('Choisis un fichier');
-        return;
-      }
-      const formData = new FormData();
-      formData.append('media', file);
-      setLoading(true);
-      try {
-        const res = await fetch(`${API_URL}/upload`, {
-          method: 'POST',
-          headers: { authorization: token },
-          body: formData,
-        });
-        const data = await res.json();
-        if (res.ok) {
-          setMessage(data.message);
-          setFile(null);
-          loadFeed();
-          loadMyMedias();
-        } else {
-          setMessage(data.message || 'Erreur upload');
-        }
-      } catch {
-        setMessage('Erreur upload');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [token, file, loadFeed, loadMyMedias, isVerified]
-  );
-
-  // Recherche utilisateurs
-  const handleSearchChange = useCallback(
-    (e) => {
-      setSearch(e.target.value);
-      if (isVerified) {
-        loadUsers(e.target.value);
+  const handleUpload = useCallback(async (e) => {
+    e.preventDefault();
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant d’uploader des fichiers');
+      return;
+    }
+    if (!file) {
+      setMessage('Choisis un fichier');
+      return;
+    }
+    if (!title.trim()) {
+      setMessage('Le titre ne peut pas être vide');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('media', file);
+    formData.append('description', description);
+    formData.append('originalname', title);
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/upload`, {
+        method: 'POST',
+        headers: { authorization: token },
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        setFile(null);
+        setTitle('');
+        setDescription('');
+        loadMyMedias();
       } else {
-        setMessage('Veuillez vérifier votre email pour rechercher des utilisateurs');
+        console.error('Erreur upload:', data.message);
+        setMessage(data.message || 'Erreur upload');
       }
-    },
-    [loadUsers, isVerified]
-  );
+    } catch (err) {
+      console.error('Erreur réseau upload:', err.message);
+      setMessage('Erreur upload');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, file, title, description, loadMyMedias, isVerified]);
 
-  // Formulaire inscription / connexion
-  const handleSubmit = useCallback(
-    async (e) => {
-      e.preventDefault();
-      const endpoint = isLogin ? '/login' : '/register';
-      setLoading(true);
-      try {
-        const body = isLogin
-          ? { email, password }
-          : { email, password, username: editUsername || email.split('@')[0] };
-        if (!isLogin && body.username) {
-          const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
-          if (!usernameRegex.test(body.username)) {
-            setMessage('Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)');
-            return;
-          }
+  const handleSearchChange = useCallback((e) => {
+    setSearch(e.target.value);
+    if (isVerified) {
+      loadUsers(e.target.value);
+    } else {
+      setMessage('Veuillez vérifier votre email pour rechercher des utilisateurs');
+    }
+  }, [loadUsers, isVerified]);
+
+  const handleSubmit = useCallback(async (e) => {
+    e.preventDefault();
+    const endpoint = isLogin ? '/login' : '/register';
+    setLoading(true);
+    try {
+      const body = isLogin
+        ? { email, password }
+        : { email, password, username: username || email.split('@')[0], role: 'user' };
+      if (!isLogin && body.username) {
+        const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+        if (!usernameRegex.test(body.username)) {
+          setMessage('Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)');
+          return;
         }
-        const res = await fetch(`${API_URL}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Erreur');
-        if (isLogin) {
-          localStorage.setItem('token', data.token);
-          setToken(data.token);
-          setEmail(data.user?.email || '');
-          setUsername(data.user?.username || '');
-          setEditUsername(data.user?.username || '');
-          setIsVerified(data.user?.isVerified || false);
-          setMessage('Connecté avec succès !');
-        } else {
-          setMessage('Inscription réussie. Vérifiez votre email pour activer votre compte.');
-          setIsLogin(true);
-          setEmail('');
-          setPassword('');
-          setEditUsername('');
-        }
-      } catch (err) {
-        setMessage(`Erreur : ${err.message}`);
-      } finally {
-        setLoading(false);
       }
-    },
-    [email, password, isLogin, editUsername]
-  );
+      const res = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error(`Erreur ${isLogin ? 'connexion' : 'inscription'}:`, data.message);
+        throw new Error(data.message || 'Erreur');
+      }
+      if (isLogin) {
+        localStorage.setItem('token', data.token);
+        setToken(data.token);
+        setEmail(data.user?.email || '');
+        setUsername(data.user?.username || '');
+        setIsVerified(data.user?.isVerified || false);
+        setRole(data.user?.role || 'user');
+        setMessage('Connecté avec succès !');
+      } else {
+        setMessage('Inscription réussie. Vérifiez votre email pour activer votre compte.');
+        setIsLogin(true);
+        setEmail('');
+        setPassword('');
+        setUsername('');
+      }
+    } catch (err) {
+      console.error(`Erreur réseau ${isLogin ? 'connexion' : 'inscription'}:`, err.message);
+      setMessage(`Erreur : ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [email, password, isLogin, username]);
 
-  // Déconnexion
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
     setToken(null);
     setIsLogin(false);
     setUsers([]);
     setFollows([]);
-    setFeed([]);
     setMyMedias([]);
     setEmail('');
     setUsername('');
-    setEditUsername('');
     setIsVerified(false);
+    setRole('user');
     setVerificationCode('');
     setMessage('Déconnecté');
-  }, []);
+    navigate('/');
+  }, [navigate]);
 
-  // Chargement initial
   useEffect(() => {
     if (token) {
       const decoded = parseJwt(token);
@@ -489,21 +489,19 @@ export default function Profile() {
       setEmail('');
       setPassword('');
       setUsername('');
-      setEditUsername('');
       setIsLogin(true);
       loadProfile();
       if (isVerified) {
         loadFollows();
-        loadFeed();
         loadMyMedias();
         loadUsers('');
       }
     }
-  }, [token, loadProfile, loadFollows, loadFeed, loadMyMedias, loadUsers, isVerified]);
+  }, [token, loadProfile, loadFollows, loadMyMedias, loadUsers, isVerified]);
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 900 }}>
-      <h1 className="mb-4 text-center text-primary">Pixels Media</h1>
+    <div className="profile-container">
+      <h1 className="mb-4 text-center text-primary">Pixels Media - Profil</h1>
 
       {!token ? (
         <div className="card p-4 bg-light text-dark rounded shadow-sm">
@@ -549,8 +547,8 @@ export default function Profile() {
                   id="username"
                   placeholder="Nom d’utilisateur"
                   className="form-control"
-                  value={editUsername}
-                  onChange={(e) => setEditUsername(e.target.value)}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   aria-label="Nom d’utilisateur"
                 />
               </div>
@@ -581,7 +579,7 @@ export default function Profile() {
         <>
           <div className="d-flex justify-content-between align-items-center mb-4">
             <h3 className="text-dark">
-              <FaUser className="me-2" /> Bonjour, {username || email || 'Utilisateur'}
+              <FaUser className="me-2" /> Bonjour, {username || email || 'Utilisateur'} ({role === 'admin' ? 'Administrateur' : 'Utilisateur'})
             </h3>
             <button
               className="btn btn-outline-danger"
@@ -642,7 +640,6 @@ export default function Profile() {
             </div>
           )}
 
-          {/* Gestion du profil */}
           <div className="card p-4 mb-4 bg-light text-dark rounded shadow-sm">
             <h4 className="text-center mb-3">Mon Profil</h4>
             <div className="mb-3">
@@ -662,8 +659,8 @@ export default function Profile() {
                 type="text"
                 id="profile-username"
                 className="form-control"
-                value={editUsername}
-                onChange={(e) => setEditUsername(e.target.value)}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 disabled={!isVerified}
                 aria-label="Nom d’utilisateur"
               />
@@ -671,7 +668,7 @@ export default function Profile() {
             <button
               className="btn btn-primary w-100"
               onClick={updateProfile}
-              disabled={loading || !editUsername.trim() || !isVerified}
+              disabled={loading || !username.trim() || !isVerified}
               aria-label="Mettre à jour le profil"
             >
               {loading ? (
@@ -682,29 +679,64 @@ export default function Profile() {
 
           {isVerified && (
             <>
-              {/* Upload média */}
-              <form onSubmit={handleUpload} className="mb-4">
-                <div className="input-group">
-                  <input
-                    type="file"
-                    accept="image/*,video/*,audio/*"
-                    className="form-control"
-                    onChange={(e) => setFile(e.target.files[0])}
-                    disabled={!isVerified}
-                    aria-label="Sélectionner un fichier"
-                  />
+              <div className="card p-4 mb-4 bg-light text-dark rounded shadow-sm">
+                <h4 className="text-center mb-3">Publier un contenu</h4>
+                <form onSubmit={handleUpload}>
+                  <div className="mb-3">
+                    <label htmlFor="media-file" className="form-label">Sélectionner un fichier</label>
+                    <input
+                      type="file"
+                      id="media-file"
+                      accept="image/*,video/*,audio/*"
+                      className="form-control"
+                      onChange={(e) => {
+                        setFile(e.target.files[0]);
+                        setTitle(e.target.files[0]?.name || '');
+                      }}
+                      disabled={!isVerified}
+                      aria-label="Sélectionner un fichier"
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label htmlFor="media-title" className="form-label">Titre</label>
+                    <input
+                      type="text"
+                      id="media-title"
+                      className="form-control"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Entrez un titre pour le média"
+                      disabled={!isVerified}
+                      aria-label="Titre du média"
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label htmlFor="description" className="form-label">Description (HTML autorisé)</label>
+                    <textarea
+                      id="description"
+                      className="form-control"
+                      rows="5"
+                      placeholder="Ajoutez une description (vous pouvez utiliser du HTML simple)"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      disabled={!isVerified}
+                      aria-label="Description du contenu"
+                    />
+                    <small className="text-muted">
+                      Vous pouvez utiliser des balises HTML comme &lt;b&gt;, &lt;i&gt;, &lt;a href="..."&gt;, etc.
+                    </small>
+                  </div>
                   <button
-                    className="btn btn-success"
+                    className="btn btn-success w-100"
                     type="submit"
-                    disabled={loading || !isVerified}
-                    aria-label="Uploader le fichier"
+                    disabled={loading || !file || !title.trim() || !isVerified}
+                    aria-label="Publier le contenu"
                   >
-                    <FaUpload className="me-1" /> {loading ? 'Upload...' : 'Upload'}
+                    <FaUpload className="me-1" /> {loading ? 'Publication...' : 'Publier'}
                   </button>
-                </div>
-              </form>
+                </form>
+              </div>
 
-              {/* Médias personnels */}
               <h4 className="mb-3">Médias personnels</h4>
               <div className="row">
                 {myMedias.length === 0 && <p className="text-muted">Aucun média uploadé.</p>}
@@ -716,33 +748,42 @@ export default function Profile() {
                           src={`${API_URL}/uploads/${media.filename}`}
                           className="card-img-top"
                           alt={media.originalname}
-                          style={{ objectFit: 'cover', height: '180px' }}
+                          onError={(e) => console.error('Erreur chargement image:', media.filename)}
                         />
                       ) : (
                         <video
                           src={`${API_URL}/uploads/${media.filename}`}
                           controls
                           className="card-img-top"
-                          style={{ height: '180px', objectFit: 'cover' }}
+                          onError={(e) => console.error('Erreur chargement vidéo:', media.filename)}
                         />
                       )}
-                      <div className="card-body d-flex flex-column">
+                      <div className="card-body">
                         {editMediaId === media._id ? (
                           <>
                             <input
                               type="text"
                               className="form-control mb-2"
-                              value={newName}
-                              onChange={(e) => setNewName(e.target.value)}
-                              aria-label="Nouveau nom du média"
+                              value={editTitle}
+                              onChange={(e) => setEditTitle(e.target.value)}
+                              placeholder="Nouveau titre"
+                              aria-label="Nouveau titre du média"
+                            />
+                            <textarea
+                              className="form-control mb-2"
+                              rows="3"
+                              value={editDescription}
+                              onChange={(e) => setEditDescription(e.target.value)}
+                              placeholder="Nouvelle description"
+                              aria-label="Nouvelle description du média"
                             />
                             <div className="d-flex justify-content-between">
                               <button
                                 className="btn btn-primary btn-sm"
-                                onClick={() => saveNewName(media._id)}
+                                onClick={() => saveMediaEdits(media._id)}
                                 disabled={loading || !isVerified}
                                 type="button"
-                                aria-label="Sauvegarder le nouveau nom"
+                                aria-label="Sauvegarder les modifications"
                               >
                                 <FaSave className="me-1" /> Sauvegarder
                               </button>
@@ -760,16 +801,20 @@ export default function Profile() {
                         ) : (
                           <>
                             <h5 className="card-title text-truncate">{media.originalname}</h5>
-                            <p className="card-text text-muted small">
-                              Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
+                            <div
+                              className="card-text"
+                              dangerouslySetInnerHTML={{ __html: media.description || 'Aucune description' }}
+                            />
+                            <p className="text-muted small">
+                              Publié le : {new Date(media.uploadedAt).toLocaleString()}
                             </p>
-                            <div className="mt-auto d-flex justify-content-between">
+                            <div className="d-flex justify-content-between">
                               <button
                                 className="btn btn-outline-warning btn-sm"
                                 onClick={() => startEditMedia(media)}
                                 disabled={loading || !isVerified}
                                 type="button"
-                                aria-label="Modifier le nom du média"
+                                aria-label="Modifier le média"
                               >
                                 <FaEdit className="me-1" /> Modifier
                               </button>
@@ -791,43 +836,6 @@ export default function Profile() {
                 ))}
               </div>
 
-              {/* Fil d'actualité médias suivis */}
-              <h4 className="mt-5 mb-3">Fil d’actualité</h4>
-              <div className="row">
-                {feed.length === 0 && <p className="text-muted">Aucun média dans votre fil.</p>}
-                {Array.isArray(feed) && feed.map((media) => (
-                  <div key={media._id} className="col-md-4 mb-3">
-                    <div className="card h-100 shadow-sm hover-card">
-                      {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                        <img
-                          src={`${API_URL}/uploads/${media.filename}`}
-                          className="card-img-top"
-                          alt={media.originalname}
-                          style={{ objectFit: 'cover', height: '180px' }}
-                        />
-                      ) : (
-                        <video
-                          src={`${API_URL}/uploads/${media.filename}`}
-                          controls
-                          className="card-img-top"
-                          style={{ height: '180px', objectFit: 'cover' }}
-                        />
-                      )}
-                      <div className="card-body">
-                        <h5 className="card-title text-truncate">{media.originalname}</h5>
-                        <p className="card-text text-muted small">
-                          Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
-                        </p>
-                        <p className="text-muted small">
-                          Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Liste utilisateurs avec recherche */}
               <h4 className="mt-5 mb-3">Utilisateurs</h4>
               <input
                 type="search"
@@ -841,14 +849,14 @@ export default function Profile() {
               <div className="list-group mb-5" style={{ maxHeight: '250px', overflowY: 'auto' }}>
                 {users.length === 0 && <p className="text-muted">Aucun utilisateur trouvé.</p>}
                 {users.map((user) => {
-                  const isFollowing = follows.includes(user._id);
+                  const isFollowing = follows.some(f => f._id === user._id);
                   return (
                     <div
                       key={user._id}
                       className="list-group-item d-flex justify-content-between align-items-center hover-list-item"
                     >
                       <span>
-                        {user.username ? `${user.username} (${user.email})` : user.email}
+                        {user.username ? `${user.username} (${user.email})` : user.email} {user.isVerified ? '(Vérifié)' : '(Non vérifié)'}
                       </span>
                       {isFollowing ? (
                         <button
