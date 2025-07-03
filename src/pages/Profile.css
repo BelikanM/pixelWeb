@@ -1,80 +1,60 @@
-/* Profile.css */
-.container {
-  padding: 20px;
-  background-color: #f8f9fa;
-  min-height: 100vh;
+/* Empêche tout défilement horizontal global */
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden; /* <-- bloque scroll horizontal */
+  overscroll-behavior-x: none; /* évite "bounce" horizontal sur mobile */
+  height: 100%;
+  width: 100%;
+  touch-action: pan-y; /* autorise scroll vertical seulement */
 }
 
-.card {
-  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+/* Conteneur principal */
+.home-container {
+  height: 100vh;
+  width: 100vw;
+  overflow-y: scroll;
+  overflow-x: hidden; /* bloque horizontal ici aussi */
+  scroll-snap-type: y mandatory;
+  background: #f0f2f5;
+  -webkit-overflow-scrolling: touch; /* inertie sur iOS */
+  touch-action: pan-y; /* bloque le scroll horizontal */
 }
 
-.card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1) !important;
-}
-
-.hover-card {
-  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-}
-
-.hover-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-}
-
-.hover-list-item {
-  transition: background-color 0.2s ease-in-out;
-}
-
-.hover-list-item:hover {
-  background-color: #e9ecef;
-}
-
-.btn-primary,
-.btn-success,
-.btn-outline-warning,
-.btn-outline-danger {
-  transition: background-color 0.2s ease-in-out, transform 0.2s ease-in-out;
-}
-
-.btn-primary:hover,
-.btn-success:hover,
-.btn-outline-warning:hover,
-.btn-outline-danger:hover {
-  transform: translateY(-2px);
-}
-
-.alert {
+/* Conteneur de chaque média */
+.media-card {
+  height: 100vh;
+  scroll-snap-align: start;
   position: relative;
-  animation: slideIn 0.3s ease-in-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+
+  border: 3px solid;
+  border-image: linear-gradient(to right, #25d366, #ffe600, #34b7f1);
+  border-image-slice: 1;
+
+  border-radius: 16px;
+  margin: 0;
+
+  overflow-x: hidden; /* sécurité */
 }
 
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* Contenu média */
+.media-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: pan-y; /* scroll vertical uniquement */
 }
 
-.text-primary {
-  color: #007bff !important;
+.media-content {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none; /* évite des gestes parasites sur la vidéo/image */
 }
 
-.text-dark {
-  color: #343a40 !important;
-}
-
-.form-control:focus {
-  border-color: #007bff;
-  box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
-}
-
-.list-group-item {
-  border-radius: 0.25rem;
-  margin-bottom: 5px;
-}
+/* ... les autres styles restent inchangés ... */

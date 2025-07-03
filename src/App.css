@@ -1,3 +1,51 @@
+/* Reset de base */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Arial', sans-serif;
+  background-color: #f9f9f9;
+  color: #222;
+}
+
+/* Classe globale pour toutes les box types (card, container, box) */
+.card, .box, .container, .content-box, .panel, .section-box {
+  border: 3px solid;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px;
+  background-color: #fff;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.06);
+  animation: random-border 4s infinite alternate ease-in-out;
+  transition: border-color 0.6s ease;
+}
+
+/* Animation aléatoire parmi vert / jaune / bleu */
+@keyframes random-border {
+  0% {
+    border-color: #25d366; /* vert WhatsApp */
+  }
+  33% {
+    border-color: #ffe600; /* jaune */
+  }
+  66% {
+    border-color: #34b7f1; /* bleu WhatsApp */
+  }
+  100% {
+    border-color: #25d366;
+  }
+}
+
+/* Optionnel : animation au survol */
+.card:hover, .box:hover, .container:hover {
+  transform: scale(1.02);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+}
+
+
 .App {
   text-align: center;
 }

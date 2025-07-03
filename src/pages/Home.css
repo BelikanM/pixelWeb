@@ -1,134 +1,127 @@
+/* Général */
 .home-container {
-  padding: 1rem;
-  overflow-y: auto;
   height: 100vh;
+  width: 100vw;
+  overflow-y: scroll;
   scroll-snap-type: y mandatory;
+  background: #f0f2f5;
 }
 
-.feed-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
+/* Conteneur de chaque média */
 .media-card {
   height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  scroll-snap-align: center;
+  scroll-snap-align: start;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #000;
+
+  /* Bordure dégradée statique */
+  border: 3px solid;
+  border-image: linear-gradient(to right, #25d366, #ffe600, #34b7f1);
+  border-image-slice: 1;
+
+  border-radius: 16px;
+  margin: 0;
 }
 
 .media-container {
   position: relative;
   width: 100%;
   height: 100%;
-  max-width: 800px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  overflow: hidden;
 }
 
 .media-content {
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  max-height: 100vh;
+  object-fit: cover;
 }
 
 .media-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
+  bottom: 0;
   width: 100%;
-  height: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  padding: 1rem;
-  color: white;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.5), transparent);
+  padding: 12px;
+  background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0));
+  color: #fff;
 }
 
-.media-info {
-  max-width: 60%;
-}
-
-.media-info h5 {
-  font-size: 1.2rem;
-  margin-bottom: 0.5rem;
-  text-shadow: 0 0 5px rgba(0, 0, 0, 0.7);
-}
-
+.media-info h5,
 .media-info h6 {
-  font-size: 1rem;
-  margin-bottom: 0.5rem;
-  text-shadow: 0 0 5px rgba(0, 0, 0, 0.7);
+  margin: 0;
+  font-weight: bold;
 }
 
 .media-description {
-  font-size: 0.9rem;
-  max-height: 100px;
-  overflow-y: auto;
-  text-shadow: 0 0 5px rgba(0, 0, 0, 0.7);
+  max-height: 80px;
+  overflow: auto;
+  margin-top: 4px;
+  font-size: 14px;
 }
 
 .media-actions {
+  margin-top: 10px;
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  align-items: center;
+  gap: 12px;
 }
 
-.like-btn {
-  background: transparent;
-  border: none;
+.like-btn,
+.play-pause-btn {
+  background: #ffffff22;
   color: white;
-  font-size: 2rem;
-  text-shadow: 0 0 5px rgba(0, 0, 0, 0.7);
-  transition: transform 0.2s;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(6px);
 }
 
 .like-btn.liked {
-  color: red;
-  transform: scale(1.2);
+  color: #ff2e63;
+  background: #ffffff44;
 }
 
-.like-btn span {
-  display: block;
-  font-size: 0.9rem;
-  margin-top: 0.5rem;
+.alert {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  z-index: 9999;
 }
 
-.play-pause-btn {
-  background: rgba(0, 0, 0, 0.5);
-  border: none;
-  color: white;
-  font-size: 1.5rem;
-  padding: 0.5rem;
-  border-radius: 50%;
+/* Supprime les marges Bootstrap sur les éléments */
+h1, h5, h6, p {
+  margin: 0;
 }
 
-@media (max-width: 576px) {
-  .media-info h5 {
-    font-size: 1rem;
-  }
-
-  .media-info h6 {
-    font-size: 0.9rem;
+/* RESPONSIVE - pour téléphone */
+@media (max-width: 600px) {
+  .media-overlay {
+    padding: 8px;
+    font-size: 14px;
   }
 
   .media-description {
-    font-size: 0.8rem;
+    max-height: 60px;
+    font-size: 12px;
   }
 
-  .like-btn {
-    font-size: 1.5rem;
-  }
-
+  .like-btn,
   .play-pause-btn {
-    font-size: 1.2rem;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .media-info h5 {
+    font-size: 16px;
+  }
+
+  .media-info h6 {
+    font-size: 14px;
   }
 }
