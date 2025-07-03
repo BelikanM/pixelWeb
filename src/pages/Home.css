@@ -1,127 +1,113 @@
-/* Général */
 .home-container {
   height: 100vh;
-  width: 100vw;
-  overflow-y: scroll;
-  scroll-snap-type: y mandatory;
-  background: #f0f2f5;
-}
-
-/* Conteneur de chaque média */
-.media-card {
-  height: 100vh;
-  scroll-snap-align: start;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #000;
-
-  /* Bordure dégradée statique */
-  border: 3px solid;
-  border-image: linear-gradient(to right, #25d366, #ffe600, #34b7f1);
-  border-image-slice: 1;
-
-  border-radius: 16px;
-  margin: 0;
-}
-
-.media-container {
-  position: relative;
-  width: 100%;
-  height: 100%;
   overflow: hidden;
 }
 
-.media-content {
+.tiktok-feed {
+  height: 100vh;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tiktok-media {
+  height: 100vh;
+  width: 100%;
+  position: relative;
+  scroll-snap-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #000;
+}
+
+.tiktok-media-content {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  max-height: 100vh;
+  max-width: 100vw;
 }
 
-.media-overlay {
+.tiktok-overlay {
   position: absolute;
-  bottom: 0;
-  width: 100%;
-  padding: 12px;
-  background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0));
-  color: #fff;
-}
-
-.media-info h5,
-.media-info h6 {
-  margin: 0;
-  font-weight: bold;
-}
-
-.media-description {
-  max-height: 80px;
-  overflow: auto;
-  margin-top: 4px;
-  font-size: 14px;
-}
-
-.media-actions {
-  margin-top: 10px;
+  bottom: 20px;
+  left: 20px;
+  right: 20px;
   display: flex;
-  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-end;
 }
 
-.like-btn,
-.play-pause-btn {
-  background: #ffffff22;
+.tiktok-info {
   color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  backdrop-filter: blur(6px);
+  text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
+  max-width: 70%;
 }
 
-.like-btn.liked {
-  color: #ff2e63;
-  background: #ffffff44;
+.tiktok-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.tiktok-actions .btn {
+  margin-bottom: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
+}
+
+.tiktok-actions .btn-danger {
+  background: rgba(255, 0, 0, 0.7);
+}
+
+.tiktok-actions .btn-outline-danger {
+  border: 1px solid rgba(255, 0, 0, 0.7);
+  color: rgba(255, 0, 0, 0.7);
+}
+
+.no-content {
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #000;
+  color: white;
+}
+
+.navbar {
+  padding: 10px 0;
+}
+
+.navbar .btn {
+  padding: 10px;
 }
 
 .alert {
   position: fixed;
   top: 10px;
-  left: 10px;
-  right: 10px;
-  z-index: 9999;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  max-width: 90%;
 }
 
-/* Supprime les marges Bootstrap sur les éléments */
-h1, h5, h6, p {
-  margin: 0;
-}
-
-/* RESPONSIVE - pour téléphone */
-@media (max-width: 600px) {
-  .media-overlay {
-    padding: 8px;
-    font-size: 14px;
+@media (max-width: 576px) {
+  .tiktok-media-content {
+    object-fit: cover;
   }
 
-  .media-description {
-    max-height: 60px;
-    font-size: 12px;
+  .tiktok-info {
+    max-width: 60%;
+    font-size: 0.9rem;
   }
 
-  .like-btn,
-  .play-pause-btn {
-    padding: 4px 8px;
-    font-size: 12px;
-  }
-
-  .media-info h5 {
-    font-size: 16px;
-  }
-
-  .media-info h6 {
-    font-size: 14px;
+  .tiktok-actions .btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 }
