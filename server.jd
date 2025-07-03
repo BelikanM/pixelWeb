@@ -15,7 +15,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: 'http://localhost:3000',
+    origin: 'http://localhost:3000', // URL de votre frontend
     methods: ['GET', 'POST', 'DELETE', 'PUT'],
   },
 });
@@ -51,22 +51,16 @@ const mediaSchema = new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  dislikes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  comments: [
-    {
-      content: { type: String, required: false },
-      media: { type: String, required: false },
-      author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      createdAt: { type: Date, default: Date.now },
-    },
-  ],
 });
 const Media = mongoose.model('Media', mediaSchema);
 
 // Configuration Nodemailer
 const transporter = nodemailer.createTransport({
   service: 'gmail',
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
 // JWT
@@ -93,7 +87,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Générer un code de vérification
+// Générer un code de vérification à 6 chiffres
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
@@ -101,7 +95,9 @@ const generateVerificationCode = () => {
 // WebSocket : Gestion des connexions
 io.on('connection', (socket) => {
   console.log('Un utilisateur est connecté via WebSocket');
-  socket.on('disconnect', () => console.log('Utilisateur déconnecté'));
+  socket.on('disconnect', () => {
+    console.log('Utilisateur déconnecté');
+  });
 });
 
 // Inscription
@@ -139,10 +135,10 @@ app.post('/register', async (req, res) => {
 
   try {
     await transporter.sendMail(mailOptions);
-    res.status(201).json({ message: 'Utilisateur inscrit. Vérifiez votre email.' });
+    res.status(201).json({ message: 'Utilisateur inscrit. Vérifiez votre email pour activer votre compte.' });
   } catch (error) {
     console.error('Erreur envoi email:', error);
-    res.status(500).json({ message: 'Utilisateur inscrit, mais erreur email.' });
+    res.status(500).json({ message: 'Utilisateur inscrit, mais erreur lors de l’envoi de l’email de vérification.' });
   }
 });
 
@@ -175,7 +171,7 @@ app.post('/request-verification', verifyToken, async (req, res) => {
     };
 
     await transporter.sendMail(mailOptions);
-    res.json({ message: 'Code de vérification envoyé.' });
+    res.json({ message: 'Code de vérification envoyé à votre email.' });
   } catch (error) {
     console.error('Erreur /request-verification:', error);
     res.status(500).json({ message: 'Erreur lors de l’envoi du code', error: error.message });
@@ -193,7 +189,7 @@ app.post('/verify-code', verifyToken, async (req, res) => {
       return res.status(400).json({ message: 'Code invalide' });
     }
     if (user.verificationCodeExpires < Date.now()) {
-      return res.status(400).json({ message: 'Code expiré.' });
+      return res.status(400).json({ message: 'Code expiré. Demandez un nouveau code.' });
     }
 
     user.isVerified = true;
@@ -222,7 +218,7 @@ app.get('/verify-email', async (req, res) => {
     user.verificationCodeExpires = undefined;
     await user.save();
 
-    res.json({ message: 'Email vérifié avec succès.' });
+    res.json({ message: 'Email vérifié avec succès. Vous pouvez maintenant vous connecter.' });
   } catch (error) {
     console.error('Erreur /verify-email:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -234,7 +230,7 @@ app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
   if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-  if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+  if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email avant de vous connecter' });
 
   const isValid = await bcrypt.compare(password, user.password);
   if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
@@ -286,17 +282,16 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Aucun fichier' });
   try {
     const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email avant d’uploader des fichiers' });
 
     const media = await Media.create({
       filename: req.file.filename,
       originalname: req.file.originalname,
       owner: req.user.userId,
       likes: [],
-      dislikes: [],
-      comments: [],
     });
     res.status(201).json({ message: 'Fichier uploadé', media });
+    // Émettre un événement WebSocket pour les nouveaux médias
     io.emit('newMedia', { media, owner: user });
   } catch (error) {
     console.error('Erreur /upload:', error);
@@ -311,14 +306,11 @@ app.get('/feed', verifyToken, async (req, res) => {
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     const medias = await Media.find({ owner: { $in: user.following || [] } })
       .populate('owner', 'email username')
-      .populate('comments.author', 'username')
       .sort({ uploadedAt: -1 });
     const mediasWithLikes = medias.map(media => ({
       ...media._doc,
       likesCount: media.likes.length,
-      dislikesCount: media.dislikes.length,
       isLiked: media.likes.includes(req.user.userId),
-      isDisliked: media.dislikes.includes(req.user.userId),
     }));
     res.json(mediasWithLikes || []);
   } catch (error) {
@@ -361,10 +353,11 @@ app.post('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
     const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email avant de suivre des utilisateurs' });
 
     await User.findByIdAndUpdate(req.user.userId, { $addToSet: { following: followingId } });
     res.json({ message: 'Abonnement effectué' });
+    // Émettre un événement WebSocket
     io.emit('followUpdate', { userId: req.user.userId, followingId });
   } catch (error) {
     console.error('Erreur /follow:', error);
@@ -378,6 +371,7 @@ app.delete('/follow', verifyToken, async (req, res) => {
   try {
     await User.findByIdAndUpdate(req.user.userId, { $pull: { following: followingId } });
     res.json({ message: 'Désabonnement effectué' });
+    // Émettre un événement WebSocket
     io.emit('unfollowUpdate', { userId: req.user.userId, unfollowedId: followingId });
   } catch (error) {
     console.error('Erreur /follow DELETE:', error);
@@ -390,7 +384,7 @@ app.get('/my-medias', verifyToken, async (req, res) => {
   try {
     const list = await Media.find({ owner: req.user.userId })
       .sort({ uploadedAt: -1 })
-      .select('-likes -dislikes -comments');
+      .select('-likes');
     res.json(list || []);
   } catch (error) {
     console.error('Erreur /my-medias:', error);
@@ -421,6 +415,7 @@ app.delete('/media/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ message: 'Non autorisé' });
     await media.deleteOne();
     res.json({ message: 'Fichier supprimé' });
+    // Émettre un événement WebSocket
     io.emit('mediaDeleted', { mediaId: req.params.id });
   } catch (error) {
     console.error('Erreur /media/:id DELETE:', error);
@@ -432,7 +427,7 @@ app.delete('/media/:id', verifyToken, async (req, res) => {
 app.post('/like/:mediaId', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email avant d’aimer un média' });
 
     const media = await Media.findById(req.params.mediaId);
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
@@ -442,12 +437,10 @@ app.post('/like/:mediaId', verifyToken, async (req, res) => {
     }
 
     media.likes.push(req.user.userId);
-    if (media.dislikes.includes(req.user.userId)) {
-      media.dislikes = media.dislikes.filter(userId => userId.toString() !== req.user.userId.toString());
-    }
     await media.save();
-    res.json({ message: 'Média aimé', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('likeUpdate', { mediaId: req.params.mediaId, likesCount: media.likes.length, dislikesCount: media.dislikes.length, userId: req.user.userId });
+    res.json({ message: 'Média aimé', likesCount: media.likes.length });
+    // Émettre un événement WebSocket
+    io.emit('likeUpdate', { mediaId: req.params.mediaId, likesCount: media.likes.length, userId: req.user.userId });
   } catch (error) {
     console.error('Erreur /like/:mediaId POST:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -466,175 +459,11 @@ app.delete('/like/:mediaId', verifyToken, async (req, res) => {
 
     media.likes = media.likes.filter(userId => userId.toString() !== req.user.userId.toString());
     await media.save();
-    res.json({ message: 'Like retiré', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('unlikeUpdate', { mediaId: req.params.mediaId, likesCount: media.likes.length, dislikesCount: media.dislikes.length, userId: req.user.userId });
+    res.json({ message: 'Like retiré', likesCount: media.likes.length });
+    // Émettre un événement WebSocket
+    io.emit('unlikeUpdate', { mediaId: req.params.mediaId, likesCount: media.likes.length, userId: req.user.userId });
   } catch (error) {
     console.error('Erreur /like/:mediaId DELETE:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
-  }
-});
-
-// Ajouter un dislike
-app.post('/dislike/:mediaId', verifyToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-
-    const media = await Media.findById(req.params.mediaId);
-    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
-
-    if (media.dislikes.includes(req.user.userId)) {
-      return res.status(400).json({ message: 'Média déjà marqué comme non apprécié' });
-    }
-
-    media.dislikes.push(req.user.userId);
-    if (media.likes.includes(req.user.userId)) {
-      media.likes = media.likes.filter(userId => userId.toString() !== req.user.userId.toString());
-    }
-    await media.save();
-    res.json({ message: 'Média marqué comme non apprécié', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('dislikeUpdate', { mediaId: req.params.mediaId, likesCount: media.likes.length, dislikesCount: media.dislikes.length, userId: req.user.userId });
-  } catch (error) {
-    console.error('Erreur /dislike/:mediaId POST:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
-  }
-});
-
-// Retirer un dislike
-app.delete('/dislike/:mediaId', verifyToken, async (req, res) => {
-  try {
-    const media = await Media.findById(req.params.mediaId);
-    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
-
-    if (!media.dislikes.includes(req.user.userId)) {
-      return res.status(400).json({ message: 'Média non marqué comme non apprécié' });
-    }
-
-    media.dislikes = media.dislikes.filter(userId => userId.toString() !== req.user.userId.toString());
-    await media.save();
-    res.json({ message: 'Dislike retiré', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('undislikeUpdate', { mediaId: req.params.mediaId, likesCount: media.likes.length, dislikesCount: media.dislikes.length, userId: req.user.userId });
-  } catch (error) {
-    console.error('Erreur /dislike/:mediaId DELETE:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
-  }
-});
-
-// Ajouter un commentaire (avec support pour texte ou média)
-app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-
-    const media = await Media.findById(req.params.mediaId);
-    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
-
-    const { content } = req.body;
-    if (!content && !req.file) {
-      return res.status(400).json({ message: 'Le commentaire ou le média ne peut pas être vide' });
-    }
-
-    // Vérifier si un commentaire identique existe déjà
-    const existingComment = media.comments.find(
-      (comment) =>
-        (content && comment.content === content.trim() && comment.author.toString() === req.user.userId) ||
-        (req.file && comment.media === req.file.filename && comment.author.toString() === req.user.userId)
-    );
-    if (existingComment) {
-      return res.status(400).json({ message: 'Commentaire ou média identique déjà soumis' });
-    }
-
-    const newComment = {
-      content: content ? content.trim() : '',
-      media: req.file ? req.file.filename : null,
-      author: req.user.userId,
-      createdAt: new Date(),
-    };
-    media.comments.push(newComment);
-    await media.save();
-    console.log(`Commentaire ajouté pour média ${req.params.mediaId} par utilisateur ${req.user.userId}: ${content || 'Média'}`);
-    const updatedMedia = await Media.findById(req.params.mediaId).populate('comments.author', 'username');
-    res.json({ message: 'Commentaire ajouté', comments: updatedMedia.comments });
-    io.emit('commentUpdate', {
-      mediaId: req.params.mediaId,
-      comment: {
-        content: content ? content.trim() : '',
-        media: req.file ? req.file.filename : null,
-        author: { _id: req.user.userId, username: user.username },
-        createdAt: new Date(),
-      },
-    });
-  } catch (error) {
-    console.error('Erreur /comment/:mediaId POST:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
-  }
-});
-
-// Modifier un commentaire
-app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-
-    const media = await Media.findById(req.params.mediaId);
-    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
-
-    const comment = media.comments.id(req.params.commentId);
-    if (!comment) return res.status(404).json({ message: 'Commentaire non trouvé' });
-    if (comment.author.toString() !== req.user.userId) {
-      return res.status(403).json({ message: 'Non autorisé à modifier ce commentaire' });
-    }
-
-    const { content } = req.body;
-    if (!content && !req.file) {
-      return res.status(400).json({ message: 'Le commentaire ou le média ne peut pas être vide' });
-    }
-
-    comment.content = content ? content.trim() : '';
-    comment.media = req.file ? req.file.filename : comment.media;
-    comment.createdAt = new Date();
-    await media.save();
-    console.log(`Commentaire modifié pour média ${req.params.mediaId}, commentaire ${req.params.commentId}`);
-    const updatedMedia = await Media.findById(req.params.mediaId).populate('comments.author', 'username');
-    res.json({ message: 'Commentaire modifié', comments: updatedMedia.comments });
-    io.emit('commentUpdate', {
-      mediaId: req.params.mediaId,
-      comment: {
-        _id: req.params.commentId,
-        content: content ? content.trim() : '',
-        media: req.file ? req.file.filename : comment.media,
-        author: { _id: req.user.userId, username: user.username },
-        createdAt: new Date(),
-      },
-    });
-  } catch (error) {
-    console.error('Erreur /comment/:mediaId/:commentId PUT:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
-  }
-});
-
-// Supprimer un commentaire
-app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-
-    const media = await Media.findById(req.params.mediaId);
-    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
-
-    const comment = media.comments.id(req.params.commentId);
-    if (!comment) return res.status(404).json({ message: 'Commentaire non trouvé' });
-    if (comment.author.toString() !== req.user.userId) {
-      return res.status(403).json({ message: 'Non autorisé à supprimer ce commentaire' });
-    }
-
-    media.comments.pull(req.params.commentId);
-    await media.save();
-    console.log(`Commentaire supprimé pour média ${req.params.mediaId}, commentaire ${req.params.commentId}`);
-    res.json({ message: 'Commentaire supprimé', comments: media.comments });
-    io.emit('commentDeleted', { mediaId: req.params.mediaId, commentId: req.params.commentId });
-  } catch (error) {
-    console.error('Erreur /comment/:mediaId/:commentId DELETE:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
