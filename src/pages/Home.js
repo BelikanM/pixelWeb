@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaThumbsUp, FaThumbsDown, FaUserCircle, FaSignOutAlt, FaComment, FaHome, FaEdit, FaSmile } from 'react-icons/fa';
+import { FaTrash, FaThumbsUp, FaThumbsDown, FaComment, FaEdit, FaSmile } from 'react-icons/fa';
 import io from 'socket.io-client';
 import './Home.css';
 
@@ -477,7 +477,14 @@ export default function Home() {
       socket.on('newMedia', ({ media, owner }) => {
         if (follows.includes(owner._id.toString())) {
           setFeed((prev) => [
-            { ...media, owner, likesCount: media.likes.length, dislikesCount: media.dislikes.length, isLiked: false, isDisliked: false },
+            {
+              ...media,
+              owner,
+              likesCount: media.likes.length,
+              dislikesCount: media.dislikes.length,
+              isLiked: false,
+              isDisliked: false,
+            },
             ...prev,
           ]);
         }
@@ -609,7 +616,7 @@ export default function Home() {
         socket.disconnect();
       };
     }
-  }, [token, isVerified, follows]);
+  }, [token, isVerified, follows, loadFeed]);
 
   // Gérer la lecture/pause automatique des vidéos
   useEffect(() => {
@@ -667,44 +674,23 @@ export default function Home() {
   return (
     <div className="home-container">
       {message && (
-        <div className={`alert ${message.includes('Erreur') ? 'alert-danger' : 'alert-success'} alert-dismissible fade show`} role="alert">
+        <div
+          className={`alert ${message.includes('Erreur') ? 'alert-danger' : 'alert-success'} alert-dismissible fade show`}
+          role="alert"
+        >
           {message}
           <button type="button" className="btn-close" onClick={() => setMessage('')} aria-label="Fermer"></button>
         </div>
       )}
-      <nav className="navbar fixed-bottom navbar-custom">
-        <div className="container-fluid justify-content-center">
-          <button
-            className="btn btn-green mx-2"
-            onClick={() => navigate('/')}
-            aria-label="Fil d’actualité"
-          >
-            <FaHome size={24} />
-          </button>
-          <button
-            className="btn btn-yellow mx-2"
-            onClick={() => navigate('/profile')}
-            aria-label="Profil"
-          >
-            <FaUserCircle size={24} />
-          </button>
-          <button
-            className="btn btn-blue mx-2"
-            onClick={handleLogout}
-            disabled={loading}
-            aria-label="Se déconnecter"
-          >
-            <FaSignOutAlt size={24} />
-          </button>
-        </div>
-      </nav>
-
       {loading ? (
         <div className="loading-screen">
           <div className="pixel-gabon-spinner">
             <svg width="50" height="50" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
               <circle cx="50" cy="50" r="40" stroke="#FFD700" strokeWidth="8" />
-              <path d="M50 10 A40 40 0 0 1 90 50 A40 40 0 0 1 50 90 A40 40 0 0 1 10 50 A40 40 0 0 1 50 10 Z" fill="#008000" />
+              <path
+                d="M50 10 A40 40 0 0 1 90 50 A40 40 0 0 1 50 90 A40 40 0 0 1 10 50 A40 40 0 0 1 50 10 Z"
+                fill="#008000"
+              />
               <circle cx="50" cy="50" r="20" fill="#0000FF" />
             </svg>
             <span>Chargement...</span>
@@ -720,11 +706,7 @@ export default function Home() {
             feed.map((media, index) => (
               <div key={media._id} className="tiktok-media fade-in">
                 {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                  <img
-                    src={`${API_URL}/uploads/${media.filename}`}
-                    alt={media.originalname}
-                    className="tiktok-media-content"
-                  />
+                  <img src={`${API_URL}/uploads/${media.filename}`} alt={media.originalname} className="tiktok-media-content" />
                 ) : (
                   <video
                     ref={(el) => (videoRefs.current[index] = el)}
@@ -741,9 +723,7 @@ export default function Home() {
                     <p className="text-white small">
                       Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
                     </p>
-                    <p className="text-white small">
-                      Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
-                    </p>
+                    <p className="text-white small">Uploadé le : {new Date(media.uploadedAt).toLocaleString()}</p>
                     <p className="text-white small">
                       <FaThumbsUp className="me-1" /> {media.likesCount} Like{media.likesCount !== 1 ? 's' : ''}
                       <span className="ms-3">
@@ -751,16 +731,13 @@ export default function Home() {
                       </span>
                     </p>
                     <div className="comments-section">
-                      <h6 className="text-white small">
-                        Commentaires ({media.comments?.length || 0}) :
-                      </h6>
+                      <h6 className="text-white small">Commentaires ({media.comments?.length || 0}) :</h6>
                       <div className="comments-list">
                         {media.comments && media.comments.length > 0 ? (
                           media.comments.map((comment, idx) => (
                             <div key={comment._id || idx} className="comment-item">
                               <p className="text-white small mb-1">
-                                <strong>{comment.author?.username || 'Utilisateur'} :</strong>{' '}
-                                {comment.content || ''}
+                                <strong>{comment.author?.username || 'Utilisateur'} :</strong> {comment.content || ''}
                                 {comment.media && (
                                   <div className="comment-media">
                                     {comment.media.match(/\.(jpg|jpeg|png|gif)$/i) ? (
@@ -770,11 +747,7 @@ export default function Home() {
                                         className="comment-media-content"
                                       />
                                     ) : (
-                                      <video
-                                        src={`${API_URL}/uploads/${comment.media}`}
-                                        className="comment-media-content"
-                                        controls
-                                      />
+                                      <video src={`${API_URL}/uploads/${comment.media}`} className="comment-media-content" controls />
                                     )}
                                   </div>
                                 )}
@@ -819,9 +792,7 @@ export default function Home() {
                             className="form-control form-control-sm"
                             placeholder="Ajouter un commentaire..."
                             value={commentInput[media._id] || ''}
-                            onChange={(e) =>
-                              setCommentInput((prev) => ({ ...prev, [media._id]: e.target.value }))
-                            }
+                            onChange={(e) => setCommentInput((prev) => ({ ...prev, [media._id]: e.target.value }))}
                             disabled={!isVerified || loading || submittingComment[media._id]}
                           />
                           <button
@@ -841,11 +812,7 @@ export default function Home() {
                             style={{ display: 'none' }}
                             id={`media-upload-${media._id}`}
                           />
-                          <label
-                            htmlFor={`media-upload-${media._id}`}
-                            className="btn btn-outline-light btn-sm"
-                            style={{ cursor: 'pointer' }}
-                          >
+                          <label htmlFor={`media-upload-${media._id}`} className="btn btn-outline-light btn-sm" style={{ cursor: 'pointer' }}>
                             📎
                           </label>
                           <button
@@ -869,11 +836,7 @@ export default function Home() {
                         {showEmojiPicker === media._id && (
                           <div className="emoji-picker">
                             {emojis.map((emoji) => (
-                              <span
-                                key={emoji}
-                                className="emoji"
-                                onClick={() => addEmoji(media._id, emoji)}
-                              >
+                              <span key={emoji} className="emoji" onClick={() => addEmoji(media._id, emoji)}>
                                 {emoji}
                               </span>
                             ))}
@@ -881,14 +844,10 @@ export default function Home() {
                         )}
                         {selectedMedia[media._id] && (
                           <div className="media-preview">
-                            <p className="text-white small mb-1">
-                              Média sélectionné : {selectedMedia[media._id].name}
-                            </p>
+                            <p className="text-white small mb-1">Média sélectionné : {selectedMedia[media._id].name}</p>
                             <button
                               className="btn btn-sm btn-outline-danger"
-                              onClick={() =>
-                                setSelectedMedia((prev) => ({ ...prev, [media._id]: null }))
-                              }
+                              onClick={() => setSelectedMedia((prev) => ({ ...prev, [media._id]: null }))}
                             >
                               Annuler
                             </button>

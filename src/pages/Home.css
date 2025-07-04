@@ -1,7 +1,40 @@
 .home-container {
   height: 100vh;
   overflow: hidden;
+  transition: padding-bottom 0.3s ease-in-out; /* Transition fluide pour le padding */
+}
+
+/* Classe pour la barre visible */
+.home-container.nav-visible {
   padding-bottom: 70px; /* Évite le chevauchement avec la barre de navigation */
+}
+
+/* Classe pour la barre masquée */
+.home-container.nav-hidden {
+  padding-bottom: 0; /* Supprime l'espace lorsque la barre est masquée */
+}
+
+/* Bouton pour basculer la barre de navigation */
+.nav-toggle-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  background: linear-gradient(135deg, #008000, #FFD700, #0000FF);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease-in-out;
+}
+
+.nav-toggle-btn:hover {
+  transform: scale(1.1);
 }
 
 /* Écran de chargement */
@@ -234,6 +267,11 @@
   padding: 10px 0;
   background: linear-gradient(135deg, #008000, #FFD700, #0000FF);
   opacity: 0.9;
+  transition: transform 0.3s ease-in-out; /* Transition fluide pour masquer/afficher */
+}
+
+.navbar-custom.navbar-hidden {
+  transform: translateY(100%); /* Masque la barre en la déplaçant vers le bas */
 }
 
 .navbar-custom .btn-green {
@@ -292,8 +330,12 @@
 }
 
 @media (max-width: 576px) {
-  .home-container {
+  .home-container.nav-visible {
     padding-bottom: 60px;
+  }
+
+  .home-container.nav-hidden {
+    padding-bottom: 0;
   }
 
   .tiktok-media-content {
@@ -326,6 +368,13 @@
   .navbar-custom .btn {
     width: 40px;
     height: 40px;
+  }
+
+  .nav-toggle-btn {
+    width: 40px;
+    height: 40px;
+    bottom: 15px;
+    right: 15px;
   }
 
   .emoji-picker {
