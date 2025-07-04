@@ -12,12 +12,20 @@ root.render(
   </React.StrictMode>
 );
 
-// If you want your app to work offline and load faster, you can change
-// unregister() to register() below. Note this comes with some pitfalls.
-// Learn more about service workers: https://cra.link/PWA
-serviceWorkerRegistration.unregister();
+// Enregistrer le service worker pour activer les notifications push et le mode hors ligne
+serviceWorkerRegistration.register({
+  onSuccess: (registration) => {
+    console.log('Service Worker enregistré avec succès:', registration);
+  },
+  onUpdate: (registration) => {
+    console.log('Service Worker mis à jour:', registration);
+    // Optionnel : demander à l'utilisateur de recharger pour appliquer la mise à jour
+    if (registration.waiting) {
+      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      window.location.reload();
+    }
+  },
+});
 
-// If you want to start measuring performance in your app, pass a function
-// to log results (for example: reportWebVitals(console.log))
-// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
-reportWebVitals();
+// Mesurer les performances de l'application (optionnel)
+reportWebVitals(console.log);

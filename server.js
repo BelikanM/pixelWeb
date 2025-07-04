@@ -10,6 +10,7 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const http = require('http');
 const { Server } = require('socket.io');
+const webPush = require('web-push');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,6 +24,13 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
+
+// Configuration des clés VAPID pour les notifications push
+webPush.setVapidDetails(
+  `mailto:${process.env.EMAIL_USER}`,
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
 
 // Connexion MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
@@ -41,6 +49,7 @@ const userSchema = new mongoose.Schema({
   verificationToken: { type: String },
   verificationCode: { type: String },
   verificationCodeExpires: { type: Date },
+  pushSubscription: { type: Object }, // Pour stocker les abonnements aux notifications push
 });
 const User = mongoose.model('User', userSchema);
 
@@ -104,9 +113,25 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log('Utilisateur déconnecté'));
 });
 
+// Route pour enregistrer l'abonnement aux notifications push
+app.post('/subscribe', verifyToken, async (req, res) => {
+  try {
+    const subscription = req.body;
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    user.pushSubscription = subscription;
+    await user.save();
+    res.status(201).json({ message: 'Abonnement enregistré' });
+  } catch (error) {
+    console.error('Erreur /subscribe:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
 // Inscription
 app.post('/register', async (req, res) => {
-  const { email, password, username } = req.body;
+  const { email, password, Susername } = req.body;
   const existing = await User.findOne({ email });
   if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
 
@@ -131,7 +156,7 @@ app.post('/register', async (req, res) => {
     subject: 'Vérifiez votre adresse email - Pixels Media',
     html: `
       <h2>Bienvenue sur Pixels Media !</h2>
-      <p>Veuillez vérifier votre adresse email en cliquant sur le lien suivant :</p>
+      <p>Veuillez vérifier votre adresse email en cliquant suri le lien suivant :</p>
       <a href="${verificationLink}">Vérifier mon email</a>
       <p>Ce lien expire dans 24 heures.</p>
     `,
@@ -146,7 +171,7 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Demander un nouveau code de vérification
+// Dem涛der un nouveau code de v茅rification
 app.post('/request-verification', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -169,7 +194,7 @@ app.post('/request-verification', verifyToken, async (req, res) => {
           <div style="text-align: center; padding: 15px; background-color: #007bff; color: white; font-size: 24px; font-weight: bold; border-radius: 5px; margin: 20px 0;">
             ${verificationCode}
           </div>
-          <p style="color: #555;">Entrez ce code dans l'application pour vérifier votre compte. Ce code expire dans 15 minutes.</p>
+          <p style="color: #555;">Entrez ce code dans l'application pour 验证 votre compte. Ce code expire dans 15 minutes.</p>
         </div>
       `,
     };
@@ -240,7 +265,7 @@ app.post('/login', async (req, res) => {
   if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
 
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '2h' });
-  res.json({ token, user: { email: user.email, username: user.username, isVerified: user.isVerified } });
+  res.json({ token, user: { email: user.email, Lillink, username: user.username, isVerified: user.isVerified } });
 });
 
 // Profil utilisateur
@@ -300,7 +325,7 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
     io.emit('newMedia', { media, owner: user });
   } catch (error) {
     console.error('Erreur /upload:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+    res.status(500).json({ message: 'Erreur serveur', Galer: error.message });
   }
 });
 
@@ -526,7 +551,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId);
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const { content } = req.body;
@@ -553,6 +578,50 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     media.comments.push(newComment);
     await media.save();
     console.log(`Commentaire ajouté pour média ${req.params.mediaId} par utilisateur ${req.user.userId}: ${content || 'Média'}`);
+
+    // Envoyer une notification email au propriétaire du média
+    if (media.owner._id.toString() !== req.user.userId) {
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: media.owner.email,
+        subject: 'Nouveau commentaire sur votre média - Pixels Media',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #f9f9f9;">
+            <h2 style="color: #333;">Nouveau commentaire sur votre média</h2>
+            <p style="color: #555;">${user.username || user.email} a commenté votre média "${media.originalname}":</p>
+            <p style="color: #555;">${content || 'Média ajouté'}</p>
+            <p style="color: #555;">Visitez votre fil pour voir le commentaire.</p>
+          </div>
+        `,
+      };
+
+      try {
+        await transporter.sendMail(mailOptions);
+        console.log(`Email de notification envoyé à ${media.owner.email}`);
+      } catch (error) {
+        console.error('Erreur envoi email de notification:', error);
+      }
+    }
+
+    // Envoyer une notification push au propriétaire du média
+    if (media.owner._id.toString() !== req.user.userId && media.owner.pushSubscription) {
+      const payload = JSON.stringify({
+        title: 'Nouveau commentaire sur votre média',
+        body: `${user.username || user.email} a commenté votre média "${media.originalname}": ${content || 'Média ajouté'}`,
+        icon: '/logo192.png', // Utilisation de l'icône du manifeste
+        data: {
+          url: 'http://localhost:3000', // URL vers votre application
+        },
+      });
+
+      try {
+        await webPush.sendNotification(media.owner.pushSubscription, payload);
+        console.log(`Notification push envoyée à ${media.owner.email}`);
+      } catch (error) {
+        console.error('Erreur envoi notification push:', error);
+      }
+    }
+
     const updatedMedia = await Media.findById(req.params.mediaId).populate('comments.author', 'username');
     res.json({ message: 'Commentaire ajouté', comments: updatedMedia.comments });
     io.emit('commentUpdate', {
@@ -576,7 +645,7 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId);
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const comment = media.comments.id(req.params.commentId);
@@ -595,6 +664,50 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     comment.createdAt = new Date();
     await media.save();
     console.log(`Commentaire modifié pour média ${req.params.mediaId}, commentaire ${req.params.commentId}`);
+
+    // Envoyer une notification email au propriétaire du média
+    if (media.owner._id.toString() !== req.user.userId) {
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: media.owner.email,
+        subject: 'Commentaire modifié sur votre média - Pixels Media',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #f9f9f9;">
+            <h2 style="color: #333;">Commentaire modifié sur votre média</h2>
+            <p style="color: #555;">${user.username || user.email} a modifié un commentaire sur votre média "${media.originalname}":</p>
+            <p style="color: #555;">${content || 'Média modifié'}</p>
+            <p style="color: #555;">Visitez votre fil pour voir le commentaire.</p>
+          </div>
+        `,
+      };
+
+      try {
+        await transporter.sendMail(mailOptions);
+        console.log(`Email de notification envoyé à ${media.owner.email}`);
+      } catch (error) {
+        console.error('Erreur envoi email de notification:', error);
+      }
+    }
+
+    // Envoyer une notification push au propriétaire du média
+    if (media.owner._id.toString() !== req.user.userId && media.owner.pushSubscription) {
+      const payload = JSON.stringify({
+        title: 'Commentaire modifié sur votre média',
+        body: `${user.username || user.email} a modifié un commentaire sur votre média "${media.originalname}": ${content || 'Média modifié'}`,
+        icon: '/logo192.png', // Utilisation de l'icône du manifeste
+        data: {
+          url: 'http://localhost:3000', // URL vers votre application
+        },
+      });
+
+      try {
+        await webPush.sendNotification(media.owner.pushSubscription, payload);
+        console.log(`Notification push envoyée à ${media.owner.email}`);
+      } catch (error) {
+        console.error('Erreur envoi notification push:', error);
+      }
+    }
+
     const updatedMedia = await Media.findById(req.params.mediaId).populate('comments.author', 'username');
     res.json({ message: 'Commentaire modifié', comments: updatedMedia.comments });
     io.emit('commentUpdate', {
@@ -619,7 +732,7 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId);
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const comment = media.comments.id(req.params.commentId);
@@ -631,6 +744,49 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
     media.comments.pull(req.params.commentId);
     await media.save();
     console.log(`Commentaire supprimé pour média ${req.params.mediaId}, commentaire ${req.params.commentId}`);
+
+    // Envoyer une notification email au propriétaire du média
+    if (media.owner._id.toString() !== req.user.userId) {
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: media.owner.email,
+        subject: 'Commentaire supprimé sur votre média - Pixels Media',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #f9f9f9;">
+            <h2 style="color: #333;">Commentaire supprimé sur votre média</h2>
+            <p style="color: #555;">${user.username || user.email} a supprimé un commentaire sur votre média "${media.originalname}".</p>
+            <p style="color: #555;">Visitez votre fil pour voir les commentaires restants.</p>
+          </div>
+        `,
+      };
+
+      try {
+        await transporter.sendMail(mailOptions);
+        console.log(`Email de notification envoyé à ${media.owner.email}`);
+      } catch (error) {
+        console.error('Erreur envoi email de notification:', error);
+      }
+    }
+
+    // Envoyer une notification push au propriétaire du média
+    if (media.owner._id.toString() !== req.user.userId && media.owner.pushSubscription) {
+      const payload = JSON.stringify({
+        title: 'Commentaire supprimé sur votre média',
+        body: `${user.username || user.email} a supprimé un commentaire sur votre média "${media.originalname}".`,
+        icon: '/logo192.png', // Utilisation de l'icône du manifeste
+        data: {
+          url: 'http://localhost:3000', // URL vers votre application
+        },
+      });
+
+      try {
+        await webPush.sendNotification(media.owner.pushSubscription, payload);
+        console.log(`Notification push envoyée à ${media.owner.email}`);
+      } catch (error) {
+        console.error('Erreur envoi notification push:', error);
+      }
+    }
+
     res.json({ message: 'Commentaire supprimé', comments: media.comments });
     io.emit('commentDeleted', { mediaId: req.params.mediaId, commentId: req.params.commentId });
   } catch (error) {
@@ -640,5 +796,5 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
 });
 
 // Lancement serveur
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.SERVER_PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Serveur actif sur http://localhost:${PORT}`));

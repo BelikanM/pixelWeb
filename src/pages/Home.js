@@ -35,6 +35,36 @@ export default function Home() {
   // Liste d'emojis prédéfinis
   const emojis = ['😊', '👍', '❤️', '😂', '😍', '😢', '😎', '🙌'];
 
+  // Demander la permission pour les notifications push et enregistrer l'abonnement
+  const subscribeToPush = useCallback(async () => {
+    if (!token || !isVerified) return;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        console.log('Permission de notification refusée');
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: process.env.REACT_APP_VAPID_PUBLIC_KEY,
+      });
+
+      await fetch(`${API_URL}/subscribe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: token,
+        },
+        body: JSON.stringify(subscription),
+      });
+      console.log('Abonnement aux notifications push enregistré');
+    } catch (error) {
+      console.error('Erreur lors de l’abonnement aux notifications push:', error);
+    }
+  }, [token, isVerified]);
+
   // Charger le profil utilisateur
   const loadProfile = useCallback(async () => {
     if (!token) return;
@@ -652,11 +682,12 @@ export default function Home() {
       if (isVerified) {
         loadFeed();
         loadFollows();
+        subscribeToPush(); // S'abonner aux notifications push
       }
     } else {
       navigate('/profile');
     }
-  }, [token, isVerified, loadProfile, loadFeed, loadFollows, navigate]);
+  }, [token, isVerified, loadProfile, loadFeed, loadFollows, navigate, subscribeToPush]);
 
   // Déconnexion
   const handleLogout = useCallback(() => {
