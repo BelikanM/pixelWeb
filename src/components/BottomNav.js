@@ -1,23 +1,53 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { AiFillHome, AiFillPicture, AiOutlineUser } from 'react-icons/ai';
+import { AiFillHome, AiFillPicture, AiOutlineUser, AiOutlineMenu } from 'react-icons/ai';
 import './BottomNav.css';
 
 export default function BottomNav() {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const toggleMenu = () => {
+    setIsMenuOpen(!isMenuOpen);
+  };
+
   return (
-    <nav className="bottom-nav">
-      <NavLink to="/" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'} end>
-        <AiFillHome size={28} />
-        <span>Accueil</span>
-      </NavLink>
-      <NavLink to="/gallery" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-        <AiFillPicture size={28} />
-        <span>Galerie</span>
-      </NavLink>
-      <NavLink to="/profile" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-        <AiOutlineUser size={28} />
-        <span>Profil</span>
-      </NavLink>
-    </nav>
+    <div className="nav-container">
+      <button
+        className="nav-toggle-button"
+        onClick={toggleMenu}
+        aria-label="Ouvrir le menu de navigation"
+      >
+        <AiOutlineMenu size={24} />
+      </button>
+      {isMenuOpen && (
+        <nav className="nav-menu">
+          <NavLink
+            to="/"
+            className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+            end
+            aria-label="Accueil"
+            onClick={toggleMenu}
+          >
+            <AiFillHome size={20} />
+          </NavLink>
+          <NavLink
+            to="/gallery"
+            className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+            aria-label="Galerie"
+            onClick={toggleMenu}
+          >
+            <AiFillPicture size={20} />
+          </NavLink>
+          <NavLink
+            to="/profile"
+            className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+            aria-label="Profil"
+            onClick={toggleMenu}
+          >
+            <AiOutlineUser size={20} />
+          </NavLink>
+        </nav>
+      )}
+    </div>
   );
 }

@@ -1,3 +1,7 @@
+main {
+  padding-bottom: 50px; /* Correspond à la nouvelle hauteur du footer */
+}
+
 /* Reset de base */
 * {
   margin: 0;
