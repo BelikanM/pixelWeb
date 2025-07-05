@@ -1,3 +1,4 @@
+// server.js
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -49,7 +50,7 @@ const userSchema = new mongoose.Schema({
   verificationToken: { type: String },
   verificationCode: { type: String },
   verificationCodeExpires: { type: Date },
-  pushSubscription: { type: Object }, // Pour stocker les abonnements aux notifications push
+  pushSubscription: { type: Object },
 });
 const User = mongoose.model('User', userSchema);
 
@@ -131,7 +132,7 @@ app.post('/subscribe', verifyToken, async (req, res) => {
 
 // Inscription
 app.post('/register', async (req, res) => {
-  const { email, password, Susername } = req.body;
+  const { email, password, username } = req.body; // Corrected typo: Susername -> username
   const existing = await User.findOne({ email });
   if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
 
@@ -156,7 +157,7 @@ app.post('/register', async (req, res) => {
     subject: 'Vérifiez votre adresse email - Pixels Media',
     html: `
       <h2>Bienvenue sur Pixels Media !</h2>
-      <p>Veuillez vérifier votre adresse email en cliquant suri le lien suivant :</p>
+      <p>Veuillez vérifier votre adresse email en cliquant sur le lien suivant :</p>
       <a href="${verificationLink}">Vérifier mon email</a>
       <p>Ce lien expire dans 24 heures.</p>
     `,
@@ -171,7 +172,7 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Dem涛der un nouveau code de v茅rification
+// Demander un nouveau code de vérification
 app.post('/request-verification', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -194,7 +195,7 @@ app.post('/request-verification', verifyToken, async (req, res) => {
           <div style="text-align: center; padding: 15px; background-color: #007bff; color: white; font-size: 24px; font-weight: bold; border-radius: 5px; margin: 20px 0;">
             ${verificationCode}
           </div>
-          <p style="color: #555;">Entrez ce code dans l'application pour 验证 votre compte. Ce code expire dans 15 minutes.</p>
+          <p style="color: #555;">Entrez ce code dans l'application pour vérifier votre compte. Ce code expire dans 15 minutes.</p>
         </div>
       `,
     };
@@ -265,7 +266,14 @@ app.post('/login', async (req, res) => {
   if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
 
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '2h' });
-  res.json({ token, user: { email: user.email, Lillink, username: user.username, isVerified: user.isVerified } });
+  res.json({ 
+    token, 
+    user: { 
+      email: user.email, 
+      username: user.username, 
+      isVerified: user.isVerified 
+    } 
+  });
 });
 
 // Profil utilisateur
@@ -325,7 +333,7 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
     io.emit('newMedia', { media, owner: user });
   } catch (error) {
     console.error('Erreur /upload:', error);
-    res.status(500).json({ message: 'Erreur serveur', Galer: error.message });
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
@@ -559,7 +567,6 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
       return res.status(400).json({ message: 'Le commentaire ou le média ne peut pas être vide' });
     }
 
-    // Vérifier si un commentaire identique existe déjà
     const existingComment = media.comments.find(
       (comment) =>
         (content && comment.content === content.trim() && comment.author.toString() === req.user.userId) ||
@@ -579,7 +586,6 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     await media.save();
     console.log(`Commentaire ajouté pour média ${req.params.mediaId} par utilisateur ${req.user.userId}: ${content || 'Média'}`);
 
-    // Envoyer une notification email au propriétaire du média
     if (media.owner._id.toString() !== req.user.userId) {
       const mailOptions = {
         from: process.env.EMAIL_USER,
@@ -603,15 +609,12 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
       }
     }
 
-    // Envoyer une notification push au propriétaire du média
     if (media.owner._id.toString() !== req.user.userId && media.owner.pushSubscription) {
       const payload = JSON.stringify({
         title: 'Nouveau commentaire sur votre média',
         body: `${user.username || user.email} a commenté votre média "${media.originalname}": ${content || 'Média ajouté'}`,
-        icon: '/logo192.png', // Utilisation de l'icône du manifeste
-        data: {
-          url: 'http://localhost:3000', // URL vers votre application
-        },
+        icon: '/logo192.png',
+        data: { url: 'http://localhost:3000' },
       });
 
       try {
@@ -627,6 +630,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     io.emit('commentUpdate', {
       mediaId: req.params.mediaId,
       comment: {
+        _id: newComment._id,
         content: content ? content.trim() : '',
         media: req.file ? req.file.filename : null,
         author: { _id: req.user.userId, username: user.username },
@@ -665,7 +669,6 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     await media.save();
     console.log(`Commentaire modifié pour média ${req.params.mediaId}, commentaire ${req.params.commentId}`);
 
-    // Envoyer une notification email au propriétaire du média
     if (media.owner._id.toString() !== req.user.userId) {
       const mailOptions = {
         from: process.env.EMAIL_USER,
@@ -689,15 +692,12 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
       }
     }
 
-    // Envoyer une notification push au propriétaire du média
     if (media.owner._id.toString() !== req.user.userId && media.owner.pushSubscription) {
       const payload = JSON.stringify({
         title: 'Commentaire modifié sur votre média',
         body: `${user.username || user.email} a modifié un commentaire sur votre média "${media.originalname}": ${content || 'Média modifié'}`,
-        icon: '/logo192.png', // Utilisation de l'icône du manifeste
-        data: {
-          url: 'http://localhost:3000', // URL vers votre application
-        },
+        icon: '/logo192.png',
+        data: { url: 'http://localhost:3000' },
       });
 
       try {
@@ -745,7 +745,6 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
     await media.save();
     console.log(`Commentaire supprimé pour média ${req.params.mediaId}, commentaire ${req.params.commentId}`);
 
-    // Envoyer une notification email au propriétaire du média
     if (media.owner._id.toString() !== req.user.userId) {
       const mailOptions = {
         from: process.env.EMAIL_USER,
@@ -768,15 +767,12 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
       }
     }
 
-    // Envoyer une notification push au propriétaire du média
     if (media.owner._id.toString() !== req.user.userId && media.owner.pushSubscription) {
       const payload = JSON.stringify({
         title: 'Commentaire supprimé sur votre média',
         body: `${user.username || user.email} a supprimé un commentaire sur votre média "${media.originalname}".`,
-        icon: '/logo192.png', // Utilisation de l'icône du manifeste
-        data: {
-          url: 'http://localhost:3000', // URL vers votre application
-        },
+        icon: '/logo192.png',
+        data: { url: 'http://localhost:3000' },
       });
 
       try {

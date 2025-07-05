@@ -1,3 +1,4 @@
+// src/Profile.js
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane } from 'react-icons/fa';
@@ -14,7 +15,6 @@ function parseJwt(token) {
 }
 
 export default function Profile() {
-  // États auth
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
@@ -24,23 +24,15 @@ export default function Profile() {
   const [userId, setUserId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
-  const [verificationCode, setVerificationCode] = useState(''); // Nouveau pour le code
-
-  // États données utilisateurs et médias
+  const [verificationCode, setVerificationCode] = useState('');
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [follows, setFollows] = useState([]);
   const [feed, setFeed] = useState([]);
   const [myMedias, setMyMedias] = useState([]);
-
-  // Upload
   const [file, setFile] = useState(null);
-
-  // Modification nom média
   const [editMediaId, setEditMediaId] = useState(null);
   const [newName, setNewName] = useState('');
-
-  // Modification profil
   const [editUsername, setEditUsername] = useState('');
 
   // Charger profil utilisateur
@@ -59,7 +51,7 @@ export default function Profile() {
         setIsVerified(data.isVerified || false);
       } else {
         setMessage(data.message || 'Erreur chargement profil');
-        if (res.status === 404 || res.status === 403) {
+        if (res.status === 401 || res.status === 403) {
           localStorage.removeItem('token');
           setToken(null);
           setIsLogin(false);
@@ -109,7 +101,7 @@ export default function Profile() {
         setIsVerified(true);
         setVerificationCode('');
         setMessage(data.message);
-        loadProfile(); // Recharger le profil pour mettre à jour isVerified
+        loadProfile();
       } else {
         setMessage(data.message || 'Erreur lors de la vérification');
       }
@@ -208,7 +200,7 @@ export default function Profile() {
         setMessage(data.message || 'Erreur follow');
       }
     } catch {
-      setMessage('Erreur follow');
+      setMessage('Erreur réseau lors de l’abonnement');
     } finally {
       setLoading(false);
     }
@@ -236,7 +228,7 @@ export default function Profile() {
         setMessage(data.message || 'Erreur unfollow');
       }
     } catch {
-      setMessage('Erreur unfollow');
+      setMessage('Erreur réseau lors du désabonnement');
     } finally {
       setLoading(false);
     }
@@ -264,7 +256,7 @@ export default function Profile() {
         setMessage(data.message || 'Erreur suppression');
       }
     } catch {
-      setMessage('Erreur suppression');
+      setMessage('Erreur réseau lors de la suppression');
     } finally {
       setLoading(false);
     }
@@ -311,7 +303,7 @@ export default function Profile() {
           setMessage(data.message || 'Erreur mise à jour');
         }
       } catch {
-        setMessage('Erreur mise à jour');
+        setMessage('Erreur réseau lors de la mise à jour');
       } finally {
         setLoading(false);
       }
@@ -349,7 +341,7 @@ export default function Profile() {
         setIsVerified(data.user.isVerified);
       } else {
         setMessage(data.message || 'Erreur mise à jour profil');
-        if (res.status === 404 || res.status === 403) {
+        if (res.status === 401 || res.status === 403) {
           localStorage.removeItem('token');
           setToken(null);
           setIsLogin(false);
@@ -394,7 +386,7 @@ export default function Profile() {
           setMessage(data.message || 'Erreur upload');
         }
       } catch {
-        setMessage('Erreur upload');
+        setMessage('Erreur réseau lors de l’upload');
       } finally {
         setLoading(false);
       }
@@ -642,7 +634,6 @@ export default function Profile() {
             </div>
           )}
 
-          {/* Gestion du profil */}
           <div className="card p-4 mb-4 bg-light text-dark rounded shadow-sm">
             <h4 className="text-center mb-3">Mon Profil</h4>
             <div className="mb-3">
@@ -682,7 +673,6 @@ export default function Profile() {
 
           {isVerified && (
             <>
-              {/* Upload média */}
               <form onSubmit={handleUpload} className="mb-4">
                 <div className="input-group">
                   <input
@@ -704,7 +694,6 @@ export default function Profile() {
                 </div>
               </form>
 
-              {/* Médias personnels */}
               <h4 className="mb-3">Médias personnels</h4>
               <div className="row">
                 {myMedias.length === 0 && <p className="text-muted">Aucun média uploadé.</p>}
@@ -791,7 +780,6 @@ export default function Profile() {
                 ))}
               </div>
 
-              {/* Fil d'actualité médias suivis */}
               <h4 className="mt-5 mb-3">Fil d’actualité</h4>
               <div className="row">
                 {feed.length === 0 && <p className="text-muted">Aucun média dans votre fil.</p>}
@@ -827,7 +815,6 @@ export default function Profile() {
                 ))}
               </div>
 
-              {/* Liste utilisateurs avec recherche */}
               <h4 className="mt-5 mb-3">Utilisateurs</h4>
               <input
                 type="search"
