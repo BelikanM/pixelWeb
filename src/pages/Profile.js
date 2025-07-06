@@ -1,4 +1,4 @@
-// src/Profile.js
+// src/pages/Profile.js
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane } from 'react-icons/fa';
@@ -34,6 +34,7 @@ export default function Profile() {
   const [editMediaId, setEditMediaId] = useState(null);
   const [newName, setNewName] = useState('');
   const [editUsername, setEditUsername] = useState('');
+  const [activeTab, setActiveTab] = useState('profile');
 
   // Charger profil utilisateur
   const loadProfile = useCallback(async () => {
@@ -592,276 +593,332 @@ export default function Profile() {
             </div>
           )}
 
-          {!isVerified && (
-            <div className="card p-4 mb-4 bg-light text-dark rounded shadow-sm">
-              <h4 className="text-center mb-3">Vérifiez votre email</h4>
-              <p className="text-center text-muted">
-                Un code de vérification a été envoyé à votre email ({email}). Entrez le code ci-dessous pour activer votre compte.
-              </p>
-              <div className="input-group mb-3">
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Entrez le code à 6 chiffres"
-                  value={verificationCode}
-                  onChange={(e) => setVerificationCode(e.target.value)}
-                  maxLength="6"
-                  aria-label="Code de vérification"
-                />
-                <button
-                  className="btn btn-primary"
-                  onClick={verifyCode}
-                  disabled={loading || !verificationCode.trim()}
-                  aria-label="Vérifier le code"
-                >
-                  {loading ? (
-                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                  ) : (
-                    <>
-                      <FaPaperPlane className="me-1" /> Vérifier
-                    </>
-                  )}
-                </button>
-              </div>
+          <ul className="nav nav-tabs mb-4">
+            <li className="nav-item">
               <button
-                className="btn btn-link w-100"
-                onClick={requestVerificationCode}
-                disabled={loading}
-                aria-label="Renvoyer un code"
+                className={`nav-link ${activeTab === 'profile' ? 'active' : ''}`}
+                onClick={() => setActiveTab('profile')}
+                aria-label="Section Profil"
               >
-                Renvoyer un nouveau code
+                Profil
               </button>
-            </div>
-          )}
-
-          <div className="card p-4 mb-4 bg-light text-dark rounded shadow-sm">
-            <h4 className="text-center mb-3">Mon Profil</h4>
-            <div className="mb-3">
-              <label htmlFor="profile-email" className="form-label">Email</label>
-              <input
-                type="text"
-                id="profile-email"
-                className="form-control"
-                value={email}
-                disabled
-                aria-label="Adresse e-mail"
-              />
-            </div>
-            <div className="mb-3">
-              <label htmlFor="profile-username" className="form-label">Nom d’utilisateur</label>
-              <input
-                type="text"
-                id="profile-username"
-                className="form-control"
-                value={editUsername}
-                onChange={(e) => setEditUsername(e.target.value)}
-                disabled={!isVerified}
-                aria-label="Nom d’utilisateur"
-              />
-            </div>
-            <button
-              className="btn btn-primary w-100"
-              onClick={updateProfile}
-              disabled={loading || !editUsername.trim() || !isVerified}
-              aria-label="Mettre à jour le profil"
-            >
-              {loading ? (
-                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-              ) : 'Mettre à jour'}
-            </button>
-          </div>
-
-          {isVerified && (
-            <>
-              <form onSubmit={handleUpload} className="mb-4">
-                <div className="input-group">
-                  <input
-                    type="file"
-                    accept="image/*,video/*,audio/*"
-                    className="form-control"
-                    onChange={(e) => setFile(e.target.files[0])}
-                    disabled={!isVerified}
-                    aria-label="Sélectionner un fichier"
-                  />
+            </li>
+            {isVerified && (
+              <>
+                <li className="nav-item">
                   <button
-                    className="btn btn-success"
-                    type="submit"
-                    disabled={loading || !isVerified}
-                    aria-label="Uploader le fichier"
+                    className={`nav-link ${activeTab === 'myMedias' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('myMedias')}
+                    aria-label="Section Médias personnels"
                   >
-                    <FaUpload className="me-1" /> {loading ? 'Upload...' : 'Upload'}
+                    Mes Médias
                   </button>
-                </div>
-              </form>
+                </li>
+                <li className="nav-item">
+                  <button
+                    className={`nav-link ${activeTab === 'feed' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('feed')}
+                    aria-label="Section Fil d’actualité"
+                  >
+                    Fil d’actualité
+                  </button>
+                </li>
+                <li className="nav-item">
+                  <button
+                    className={`nav-link ${activeTab === 'users' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('users')}
+                    aria-label="Section Utilisateurs"
+                  >
+                    Utilisateurs
+                  </button>
+                </li>
+              </>
+            )}
+          </ul>
 
-              <h4 className="mb-3">Médias personnels</h4>
-              <div className="row">
-                {myMedias.length === 0 && <p className="text-muted">Aucun média uploadé.</p>}
-                {myMedias.map((media) => (
-                  <div key={media._id} className="col-md-4 mb-3">
-                    <div className="card h-100 shadow-sm hover-card">
-                      {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                        <img
-                          src={`${API_URL}/uploads/${media.filename}`}
-                          className="card-img-top"
-                          alt={media.originalname}
-                          style={{ objectFit: 'cover', height: '180px' }}
-                        />
-                      ) : (
-                        <video
-                          src={`${API_URL}/uploads/${media.filename}`}
-                          controls
-                          className="card-img-top"
-                          style={{ height: '180px', objectFit: 'cover' }}
-                        />
-                      )}
-                      <div className="card-body d-flex flex-column">
-                        {editMediaId === media._id ? (
-                          <>
-                            <input
-                              type="text"
-                              className="form-control mb-2"
-                              value={newName}
-                              onChange={(e) => setNewName(e.target.value)}
-                              aria-label="Nouveau nom du média"
-                            />
-                            <div className="d-flex justify-content-between">
-                              <button
-                                className="btn btn-primary btn-sm"
-                                onClick={() => saveNewName(media._id)}
-                                disabled={loading || !isVerified}
-                                type="button"
-                                aria-label="Sauvegarder le nouveau nom"
-                              >
-                                <FaSave className="me-1" /> Sauvegarder
-                              </button>
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                onClick={cancelEdit}
-                                disabled={loading}
-                                type="button"
-                                aria-label="Annuler l’édition"
-                              >
-                                <FaTimes className="me-1" /> Annuler
-                              </button>
-                            </div>
-                          </>
+          <div className="tab-content" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+            {activeTab === 'profile' && (
+              <div className="card p-4 bg-light text-dark rounded shadow-sm">
+                {!isVerified ? (
+                  <>
+                    <h4 className="text-center mb-3">Vérifiez votre email</h4>
+                    <p className="text-center text-muted">
+                      Un code de vérification a été envoyé à votre email ({email}). Entrez le code ci-dessous pour activer votre compte.
+                    </p>
+                    <div className="input-group mb-3">
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Entrez le code à 6 chiffres"
+                        value={verificationCode}
+                        onChange={(e) => setVerificationCode(e.target.value)}
+                        maxLength="6"
+                        aria-label="Code de vérification"
+                      />
+                      <button
+                        className="btn btn-primary"
+                        onClick={verifyCode}
+                        disabled={loading || !verificationCode.trim()}
+                        aria-label="Vérifier le code"
+                      >
+                        {loading ? (
+                          <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                         ) : (
                           <>
-                            <h5 className="card-title text-truncate">{media.originalname}</h5>
-                            <p className="card-text text-muted small">
-                              Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
-                            </p>
-                            <div className="mt-auto d-flex justify-content-between">
-                              <button
-                                className="btn btn-outline-warning btn-sm"
-                                onClick={() => startEditMedia(media)}
-                                disabled={loading || !isVerified}
-                                type="button"
-                                aria-label="Modifier le nom du média"
-                              >
-                                <FaEdit className="me-1" /> Modifier
-                              </button>
-                              <button
-                                className="btn btn-outline-danger btn-sm"
-                                onClick={() => deleteMedia(media._id)}
-                                disabled={loading || !isVerified}
-                                type="button"
-                                aria-label="Supprimer le média"
-                              >
-                                <FaTrash className="me-1" /> Supprimer
-                              </button>
-                            </div>
+                            <FaPaperPlane className="me-1" /> Vérifier
                           </>
                         )}
-                      </div>
+                      </button>
                     </div>
-                  </div>
-                ))}
-              </div>
-
-              <h4 className="mt-5 mb-3">Fil d’actualité</h4>
-              <div className="row">
-                {feed.length === 0 && <p className="text-muted">Aucun média dans votre fil.</p>}
-                {Array.isArray(feed) && feed.map((media) => (
-                  <div key={media._id} className="col-md-4 mb-3">
-                    <div className="card h-100 shadow-sm hover-card">
-                      {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                        <img
-                          src={`${API_URL}/uploads/${media.filename}`}
-                          className="card-img-top"
-                          alt={media.originalname}
-                          style={{ objectFit: 'cover', height: '180px' }}
-                        />
-                      ) : (
-                        <video
-                          src={`${API_URL}/uploads/${media.filename}`}
-                          controls
-                          className="card-img-top"
-                          style={{ height: '180px', objectFit: 'cover' }}
-                        />
-                      )}
-                      <div className="card-body">
-                        <h5 className="card-title text-truncate">{media.originalname}</h5>
-                        <p className="card-text text-muted small">
-                          Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
-                        </p>
-                        <p className="text-muted small">
-                          Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <h4 className="mt-5 mb-3">Utilisateurs</h4>
-              <input
-                type="search"
-                className="form-control mb-3"
-                placeholder="Rechercher par email ou nom d’utilisateur"
-                value={search}
-                onChange={handleSearchChange}
-                disabled={!isVerified}
-                aria-label="Rechercher un utilisateur"
-              />
-              <div className="list-group mb-5" style={{ maxHeight: '250px', overflowY: 'auto' }}>
-                {users.length === 0 && <p className="text-muted">Aucun utilisateur trouvé.</p>}
-                {users.map((user) => {
-                  const isFollowing = follows.includes(user._id);
-                  return (
-                    <div
-                      key={user._id}
-                      className="list-group-item d-flex justify-content-between align-items-center hover-list-item"
+                    <button
+                      className="btn btn-link w-100"
+                      onClick={requestVerificationCode}
+                      disabled={loading}
+                      aria-label="Renvoyer un code"
                     >
-                      <span>
-                        {user.username ? `${user.username} (${user.email})` : user.email}
-                      </span>
-                      {isFollowing ? (
-                        <button
-                          className="btn btn-sm btn-outline-danger"
-                          onClick={() => unfollowUser(user._id)}
-                          disabled={loading || !isVerified}
-                          aria-label={`Ne plus suivre ${user.username || user.email}`}
-                        >
-                          <FaUserCheck className="me-1" /> Ne plus suivre
-                        </button>
-                      ) : (
-                        <button
-                          className="btn btn-sm btn-outline-primary"
-                          onClick={() => followUser(user._id)}
-                          disabled={loading || !isVerified}
-                          aria-label={`Suivre ${user.username || user.email}`}
-                        >
-                          <FaUserPlus className="me-1" /> Suivre
-                        </button>
-                      )}
+                      Renvoyer un nouveau code
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h4 className="text-center mb-3">Mon Profil</h4>
+                    <div className="mb-3">
+                      <label htmlFor="profile-email" className="form-label">Email</label>
+                      <input
+                        type="text"
+                        id="profile-email"
+                        className="form-control"
+                        value={email}
+                        disabled
+                        aria-label="Adresse e-mail"
+                      />
                     </div>
-                  );
-                })}
+                    <div className="mb-3">
+                      <label htmlFor="profile-username" className="form-label">Nom d’utilisateur</label>
+                      <input
+                        type="text"
+                        id="profile-username"
+                        className="form-control"
+                        value={editUsername}
+                        onChange={(e) => setEditUsername(e.target.value)}
+                        disabled={!isVerified}
+                        aria-label="Nom d’utilisateur"
+                      />
+                    </div>
+                    <button
+                      className="btn btn-primary w-100"
+                      onClick={updateProfile}
+                      disabled={loading || !editUsername.trim() || !isVerified}
+                      aria-label="Mettre à jour le profil"
+                    >
+                      {loading ? (
+                        <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                      ) : 'Mettre à jour'}
+                    </button>
+                  </>
+                )}
               </div>
-            </>
-          )}
+            )}
+
+            {activeTab === 'myMedias' && isVerified && (
+              <div>
+                <form onSubmit={handleUpload} className="mb-4">
+                  <div className="input-group">
+                    <input
+                      type="file"
+                      accept="image/*,video/*,audio/*"
+                      className="form-control"
+                      onChange={(e) => setFile(e.target.files[0])}
+                      disabled={!isVerified}
+                      aria-label="Sélectionner un fichier"
+                    />
+                    <button
+                      className="btn btn-success"
+                      type="submit"
+                      disabled={loading || !isVerified}
+                      aria-label="Uploader le fichier"
+                    >
+                      <FaUpload className="me-1" /> {loading ? 'Upload...' : 'Upload'}
+                    </button>
+                  </div>
+                </form>
+                <h4 className="mb-3">Médias personnels</h4>
+                <div className="row">
+                  {myMedias.length === 0 && <p className="text-muted">Aucun média uploadé.</p>}
+                  {myMedias.map((media) => (
+                    <div key={media._id} className="col-md-4 mb-3">
+                      <div className="card h-100 shadow-sm hover-card">
+                        {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                          <img
+                            src={`${API_URL}/uploads/${media.filename}`}
+                            className="card-img-top"
+                            alt={media.originalname}
+                            style={{ objectFit: 'cover', height: '180px' }}
+                          />
+                        ) : (
+                          <video
+                            src={`${API_URL}/uploads/${media.filename}`}
+                            controls
+                            className="card-img-top"
+                            style={{ height: '180px', objectFit: 'cover' }}
+                          />
+                        )}
+                        <div className="card-body d-flex flex-column">
+                          {editMediaId === media._id ? (
+                            <>
+                              <input
+                                type="text"
+                                className="form-control mb-2"
+                                value={newName}
+                                onChange={(e) => setNewName(e.target.value)}
+                                aria-label="Nouveau nom du média"
+                              />
+                              <div className="d-flex justify-content-between">
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  onClick={() => saveNewName(media._id)}
+                                  disabled={loading || !isVerified}
+                                  type="button"
+                                  aria-label="Sauvegarder le nouveau nom"
+                                >
+                                  <FaSave className="me-1" /> Sauvegarder
+                                </button>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={cancelEdit}
+                                  disabled={loading}
+                                  type="button"
+                                  aria-label="Annuler l’édition"
+                                >
+                                  <FaTimes className="me-1" /> Annuler
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <h5 className="card-title text-truncate">{media.originalname}</h5>
+                              <p className="card-text text-muted small">
+                                Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
+                              </p>
+                              <div className="mt-auto d-flex justify-content-between">
+                                <button
+                                  className="btn btn-outline-warning btn-sm"
+                                  onClick={() => startEditMedia(media)}
+                                  disabled={loading || !isVerified}
+                                  type="button"
+                                  aria-label="Modifier le nom du média"
+                                >
+                                  <FaEdit className="me-1" /> Modifier
+                                </button>
+                                <button
+                                  className="btn btn-outline-danger btn-sm"
+                                  onClick={() => deleteMedia(media._id)}
+                                  disabled={loading || !isVerified}
+                                  type="button"
+                                  aria-label="Supprimer le média"
+                                >
+                                  <FaTrash className="me-1" /> Supprimer
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'feed' && isVerified && (
+              <div>
+                <h4 className="mb-3">Fil d’actualité</h4>
+                <div className="row">
+                  {feed.length === 0 && <p className="text-muted">Aucun média dans votre fil.</p>}
+                  {Array.isArray(feed) && feed.map((media) => (
+                    <div key={media._id} className="col-md-4 mb-3">
+                      <div className="card h-100 shadow-sm hover-card">
+                        {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                          <img
+                            src={`${API_URL}/uploads/${media.filename}`}
+                            className="card-img-top"
+                            alt={media.originalname}
+                            style={{ objectFit: 'cover', height: '180px' }}
+                          />
+                        ) : (
+                          <video
+                            src={`${API_URL}/uploads/${media.filename}`}
+                            controls
+                            className="card-img-top"
+                            style={{ height: '180px', objectFit: 'cover' }}
+                          />
+                        )}
+                        <div className="card-body">
+                          <h5 className="card-title text-truncate">{media.originalname}</h5>
+                          <p className="card-text text-muted small">
+                            Uploadé le : {new Date(media.uploadedAt).toLocaleString()}
+                          </p>
+                          <p className="text-muted small">
+                            Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'users' && isVerified && (
+              <div>
+                <h4 className="mb-3">Utilisateurs</h4>
+                <input
+                  type="search"
+                  className="form-control mb-3"
+                  placeholder="Rechercher par email ou nom d’utilisateur"
+                  value={search}
+                  onChange={handleSearchChange}
+                  disabled={!isVerified}
+                  aria-label="Rechercher un utilisateur"
+                />
+                <div className="list-group" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+                  {users.length === 0 && <p className="text-muted">Aucun utilisateur trouvé.</p>}
+                  {users.map((user) => {
+                    const isFollowing = follows.includes(user._id);
+                    return (
+                      <div
+                        key={user._id}
+                        className="list-group-item d-flex justify-content-between align-items-center hover-list-item"
+                      >
+                        <span>
+                          {user.username ? `${user.username} (${user.email})` : user.email}
+                        </span>
+                        {isFollowing ? (
+                          <button
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={() => unfollowUser(user._id)}
+                            disabled={loading || !isVerified}
+                            aria-label={`Ne plus suivre ${user.username || user.email}`}
+                          >
+                            <FaUserCheck className="me-1" /> Ne plus suivre
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={() => followUser(user._id)}
+                            disabled={loading || !isVerified}
+                            aria-label={`Suivre ${user.username || user.email}`}
+                          >
+                            <FaUserPlus className="me-1" /> Suivre
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

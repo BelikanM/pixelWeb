@@ -24,20 +24,19 @@ export default function Home() {
   const [follows, setFollows] = useState([]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState({});
   const [commentInput, setCommentInput] = useState({});
   const [submittingComment, setSubmittingComment] = useState({});
   const [editingComment, setEditingComment] = useState(null);
   const [selectedMedia, setSelectedMedia] = useState({});
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
-  const [isMuted, setIsMuted] = useState(false); // Global mute state
-  const videoRefs = useRef(new Map()); // Map to store video refs by media ID
-  const observerRef = useRef(null); // Store IntersectionObserver
+  const [isMuted, setIsMuted] = useState(false);
+  const videoRefs = useRef(new Map());
+  const observerRef = useRef(null);
   const navigate = useNavigate();
 
-  // Liste d'emojis prédéfinis
   const emojis = ['😊', '👍', '❤️', '😂', '😍', '😢', '😎', '🙌'];
 
-  // Demander la permission pour les notifications push et enregistrer l'abonnement
   const subscribeToPush = useCallback(async () => {
     if (!token || !isVerified) return;
     try {
@@ -67,7 +66,6 @@ export default function Home() {
     }
   }, [token, isVerified]);
 
-  // Charger le profil utilisateur
   const loadProfile = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -95,7 +93,6 @@ export default function Home() {
     }
   }, [token, navigate]);
 
-  // Charger le feed
   const loadFeed = useCallback(async () => {
     if (!token || !isVerified) return;
     setLoading(true);
@@ -118,7 +115,6 @@ export default function Home() {
     }
   }, [token, isVerified]);
 
-  // Charger les suivis
   const loadFollows = useCallback(async () => {
     if (!token || !isVerified) return;
     setLoading(true);
@@ -138,14 +134,13 @@ export default function Home() {
     }
   }, [token, isVerified]);
 
-  // Suivre un utilisateur
   const followUser = useCallback(
     async (id) => {
       if (!isVerified) {
         setMessage('Veuillez vérifier votre email avant de suivre des utilisateurs');
         return;
       }
-      setLoading(true);
+      setActionLoading((prev) => ({ ...prev, [`follow-${id}`]: true }));
       try {
         const res = await fetch(`${API_URL}/follow`, {
           method: 'POST',
@@ -162,20 +157,19 @@ export default function Home() {
       } catch {
         setMessage('Erreur réseau lors de l’abonnement');
       } finally {
-        setLoading(false);
+        setActionLoading((prev) => ({ ...prev, [`follow-${id}`]: false }));
       }
     },
     [token, isVerified]
   );
 
-  // Ne plus suivre un utilisateur
   const unfollowUser = useCallback(
     async (id) => {
       if (!isVerified) {
         setMessage('Veuillez vérifier votre email avant de modifier vos abonnements');
         return;
       }
-      setLoading(true);
+      setActionLoading((prev) => ({ ...prev, [`unfollow-${id}`]: true }));
       try {
         const res = await fetch(`${API_URL}/follow`, {
           method: 'DELETE',
@@ -195,13 +189,12 @@ export default function Home() {
       } catch {
         setMessage('Erreur réseau lors du désabonnement');
       } finally {
-        setLoading(false);
+        setActionLoading((prev) => ({ ...prev, [`unfollow-${id}`]: false }));
       }
     },
     [token, isVerified]
   );
 
-  // Supprimer un média
   const deleteMedia = useCallback(
     async (id) => {
       if (!isVerified) {
@@ -209,7 +202,7 @@ export default function Home() {
         return;
       }
       if (!window.confirm('Supprimer ce média ?')) return;
-      setLoading(true);
+      setActionLoading((prev) => ({ ...prev, [`delete-${id}`]: true }));
       try {
         const res = await fetch(`${API_URL}/media/${id}`, {
           method: 'DELETE',
@@ -225,20 +218,19 @@ export default function Home() {
       } catch {
         setMessage('Erreur réseau lors de la suppression');
       } finally {
-        setLoading(false);
+        setActionLoading((prev) => ({ ...prev, [`delete-${id}`]: false }));
       }
     },
     [token, isVerified]
   );
 
-  // Aimer un média
   const likeMedia = useCallback(
     async (mediaId) => {
       if (!isVerified) {
         setMessage('Veuillez vérifier votre email avant d’aimer un média');
         return;
       }
-      setLoading(true);
+      setActionLoading((prev) => ({ ...prev, [`like-${mediaId}`]: true }));
       try {
         const res = await fetch(`${API_URL}/like/${mediaId}`, {
           method: 'POST',
@@ -253,20 +245,19 @@ export default function Home() {
       } catch {
         setMessage('Erreur réseau lors de l’ajout du like');
       } finally {
-        setLoading(false);
+        setActionLoading((prev) => ({ ...prev, [`like-${mediaId}`]: false }));
       }
     },
     [token, isVerified]
   );
 
-  // Retirer un like
   const unlikeMedia = useCallback(
     async (mediaId) => {
       if (!isVerified) {
         setMessage('Veuillez vérifier votre email avant de retirer un like');
         return;
       }
-      setLoading(true);
+      setActionLoading((prev) => ({ ...prev, [`unlike-${mediaId}`]: true }));
       try {
         const res = await fetch(`${API_URL}/like/${mediaId}`, {
           method: 'DELETE',
@@ -281,20 +272,19 @@ export default function Home() {
       } catch {
         setMessage('Erreur réseau lors du retrait du like');
       } finally {
-        setLoading(false);
+        setActionLoading((prev) => ({ ...prev, [`unlike-${mediaId}`]: false }));
       }
     },
     [token, isVerified]
   );
 
-  // Ajouter un dislike
   const dislikeMedia = useCallback(
     async (mediaId) => {
       if (!isVerified) {
         setMessage('Veuillez vérifier votre email avant de marquer un média comme non apprécié');
         return;
       }
-      setLoading(true);
+      setActionLoading((prev) => ({ ...prev, [`dislike-${mediaId}`]: true }));
       try {
         const res = await fetch(`${API_URL}/dislike/${mediaId}`, {
           method: 'POST',
@@ -309,20 +299,19 @@ export default function Home() {
       } catch {
         setMessage('Erreur réseau lors de l’ajout du dislike');
       } finally {
-        setLoading(false);
+        setActionLoading((prev) => ({ ...prev, [`dislike-${mediaId}`]: false }));
       }
     },
     [token, isVerified]
   );
 
-  // Retirer un dislike
   const undislikeMedia = useCallback(
     async (mediaId) => {
       if (!isVerified) {
         setMessage('Veuillez vérifier votre email avant de retirer un dislike');
         return;
       }
-      setLoading(true);
+      setActionLoading((prev) => ({ ...prev, [`undislike-${mediaId}`]: true }));
       try {
         const res = await fetch(`${API_URL}/dislike/${mediaId}`, {
           method: 'DELETE',
@@ -337,13 +326,12 @@ export default function Home() {
       } catch {
         setMessage('Erreur réseau lors du retrait du dislike');
       } finally {
-        setLoading(false);
+        setActionLoading((prev) => ({ ...prev, [`undislike-${mediaId}`]: false }));
       }
     },
     [token, isVerified]
   );
 
-  // Ajouter un commentaire
   const addComment = useCallback(
     async (mediaId) => {
       if (!isVerified) {
@@ -388,7 +376,6 @@ export default function Home() {
     [token, isVerified, commentInput, submittingComment, selectedMedia]
   );
 
-  // Modifier un commentaire
   const editComment = useCallback(
     async (mediaId, commentId) => {
       if (!isVerified) {
@@ -434,7 +421,6 @@ export default function Home() {
     [token, isVerified, commentInput, selectedMedia, submittingComment]
   );
 
-  // Supprimer un commentaire
   const deleteComment = useCallback(
     async (mediaId, commentId) => {
       if (!isVerified) {
@@ -442,7 +428,7 @@ export default function Home() {
         return;
       }
       if (!window.confirm('Supprimer ce commentaire ?')) return;
-      setLoading(true);
+      setActionLoading((prev) => ({ ...prev, [`delete-comment-${mediaId}-${commentId}`]: true }));
       try {
         const res = await fetch(`${API_URL}/comment/${mediaId}/${commentId}`, {
           method: 'DELETE',
@@ -457,13 +443,12 @@ export default function Home() {
       } catch {
         setMessage('Erreur réseau lors de la suppression du commentaire');
       } finally {
-        setLoading(false);
+        setActionLoading((prev) => ({ ...prev, [`delete-comment-${mediaId}-${commentId}`]: false }));
       }
     },
     [token, isVerified]
   );
 
-  // Gérer la sélection d’un emoji
   const addEmoji = (mediaId, emoji) => {
     setCommentInput((prev) => ({
       ...prev,
@@ -472,7 +457,6 @@ export default function Home() {
     setShowEmojiPicker(null);
   };
 
-  // Gérer la sélection d’un fichier média
   const handleMediaChange = (mediaId, event) => {
     const file = event.target.files[0];
     if (file) {
@@ -480,7 +464,6 @@ export default function Home() {
     }
   };
 
-  // Toggle mute state
   const toggleMute = () => {
     setIsMuted((prev) => !prev);
     videoRefs.current.forEach((video) => {
@@ -488,7 +471,6 @@ export default function Home() {
     });
   };
 
-  // Gérer la lecture/pause automatique des vidéos
   useEffect(() => {
     let currentPlayingVideo = null;
 
@@ -499,11 +481,9 @@ export default function Home() {
           const mediaId = video.dataset.mediaId;
 
           if (entry.isIntersecting && !isMuted) {
-            // Pause any currently playing video
             if (currentPlayingVideo && currentPlayingVideo !== video) {
               currentPlayingVideo.pause();
             }
-            // Play the current video
             video.play().catch((error) => {
               console.error(`Erreur lors de la lecture de la vidéo ${mediaId}:`, error);
               setMessage('Impossible de lire la vidéo. Veuillez réessayer.');
@@ -517,18 +497,15 @@ export default function Home() {
           }
         });
       },
-      { threshold: 0.6, rootMargin: '0px' } // Adjusted threshold for smoother transitions
+      { threshold: 0.6, rootMargin: '0px' }
     );
 
     observerRef.current = observer;
 
-    // Observe all video elements
     videoRefs.current.forEach((video, mediaId) => {
       if (video) {
         observer.observe(video);
-        // Set initial mute state
         video.muted = isMuted;
-        // Add error handler
         video.addEventListener('error', () => {
           console.error(`Erreur de chargement de la vidéo ${mediaId}`);
           setMessage(`Impossible de charger la vidéo ${mediaId}. Vérifiez votre connexion ou le format du fichier.`);
@@ -537,7 +514,6 @@ export default function Home() {
     });
 
     return () => {
-      // Cleanup observer and event listeners
       videoRefs.current.forEach((video, mediaId) => {
         if (video) {
           observer.unobserve(video);
@@ -548,7 +524,6 @@ export default function Home() {
     };
   }, [feed, isMuted]);
 
-  // Gérer les événements WebSocket
   useEffect(() => {
     if (token && isVerified) {
       socket.auth = { token };
@@ -592,7 +567,6 @@ export default function Home() {
 
       socket.on('mediaDeleted', ({ mediaId }) => {
         setFeed((prev) => prev.filter((media) => media._id !== mediaId));
-        // Remove video ref for deleted media
         videoRefs.current.delete(mediaId);
       });
 
@@ -720,7 +694,6 @@ export default function Home() {
     }
   }, [token, isVerified, follows, loadFeed]);
 
-  // Chargement initial
   useEffect(() => {
     if (token) {
       loadProfile();
@@ -734,7 +707,6 @@ export default function Home() {
     }
   }, [token, isVerified, loadProfile, loadFeed, loadFollows, navigate, subscribeToPush]);
 
-  // Déconnexion
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
     setToken(null);
@@ -751,7 +723,7 @@ export default function Home() {
     <div className="home-container">
       <button
         className="btn btn-outline-light btn-sm position-fixed top-0 end-0 m-2"
-        on onClick={toggleMute}
+        onClick={toggleMute}
         aria-label={isMuted ? 'Activer le son' : 'Couper le son'}
       >
         {isMuted ? <FaVolumeMute /> : <FaVolumeUp />}
@@ -795,9 +767,9 @@ export default function Home() {
                     ref={(el) => {
                       if (el) {
                         videoRefs.current.set(media._id, el);
-                        el.dataset.mediaId = media._id; // Store mediaId for reference
+                        el.dataset.mediaId = media._id;
                       } else {
-                        videoRefs.current.delete(media._id); // Clean up when unmounted
+                        videoRefs.current.delete(media._id);
                       }
                     }}
                     src={`${API_URL}/uploads/${media.filename}`}
@@ -807,7 +779,6 @@ export default function Home() {
                     preload="metadata"
                     volume={0.5}
                     muted={isMuted}
-                    // controls // Uncomment to enable browser video controls
                     onError={() => setMessage(`Erreur de chargement de la vidéo ${media._id}.`)}
                   />
                 )}
@@ -868,6 +839,7 @@ export default function Home() {
                                     className="btn btn-sm btn-outline-danger"
                                     onClick={() => deleteComment(media._id, comment._id)}
                                     aria-label="Supprimer le commentaire"
+                                    disabled={actionLoading[`delete-comment-${media._id}-${comment._id}`]}
                                   >
                                     <FaTrash />
                                   </button>
@@ -887,12 +859,12 @@ export default function Home() {
                             placeholder="Ajouter un commentaire..."
                             value={commentInput[media._id] || ''}
                             onChange={(e) => setCommentInput((prev) => ({ ...prev, [media._id]: e.target.value }))}
-                            disabled={!isVerified || loading || submittingComment[media._id]}
+                            disabled={!isVerified || submittingComment[media._id]}
                           />
                           <button
                             className="btn btn-outline-light btn-sm"
                             onClick={() => setShowEmojiPicker(showEmojiPicker === media._id ? null : media._id)}
-                            disabled={!isVerified || loading || submittingComment[media._id]}
+                            disabled={!isVerified || submittingComment[media._id]}
                             aria-label="Ajouter un emoji"
                           >
                             <FaSmile />
@@ -901,7 +873,7 @@ export default function Home() {
                             type="file"
                             accept="image/*,video/*"
                             onChange={(e) => handleMediaChange(media._id, e)}
-                            disabled={!isVerified || loading || submittingComment[media._id]}
+                            disabled={!isVerified || submittingComment[media._id]}
                             className="form-control form-control-sm"
                             style={{ display: 'none' }}
                             id={`media-upload-${media._id}`}
@@ -918,7 +890,6 @@ export default function Home() {
                             }
                             disabled={
                               !isVerified ||
-                              loading ||
                               submittingComment[media._id] ||
                               (!commentInput[media._id]?.trim() && !selectedMedia[media._id])
                             }
@@ -955,7 +926,7 @@ export default function Home() {
                       <button
                         className="btn btn-danger btn-sm rounded-circle mb-2"
                         onClick={() => deleteMedia(media._id)}
-                        disabled={!isVerified || loading}
+                        disabled={!isVerified || actionLoading[`delete-${media._id}`]}
                         aria-label="Supprimer le média"
                       >
                         <FaTrash />
@@ -967,7 +938,7 @@ export default function Home() {
                           <button
                             className="btn btn-danger btn-sm rounded-circle mb-2"
                             onClick={() => unlikeMedia(media._id)}
-                            disabled={!isVerified || loading}
+                            disabled={!isVerified || actionLoading[`unlike-${media._id}`]}
                             aria-label="Retirer le like"
                           >
                             <FaThumbsUp />
@@ -976,7 +947,7 @@ export default function Home() {
                           <button
                             className="btn btn-outline-danger btn-sm rounded-circle mb-2"
                             onClick={() => likeMedia(media._id)}
-                            disabled={!isVerified || loading}
+                            disabled={!isVerified || actionLoading[`like-${media._id}`]}
                             aria-label="Aimer le média"
                           >
                             <FaThumbsUp />
@@ -986,7 +957,7 @@ export default function Home() {
                           <button
                             className="btn btn-warning btn-sm rounded-circle mb-2"
                             onClick={() => undislikeMedia(media._id)}
-                            disabled={!isVerified || loading}
+                            disabled={!isVerified || actionLoading[`undislike-${media._id}`]}
                             aria-label="Retirer le dislike"
                           >
                             <FaThumbsDown />
@@ -995,7 +966,7 @@ export default function Home() {
                           <button
                             className="btn btn-outline-warning btn-sm rounded-circle mb-2"
                             onClick={() => dislikeMedia(media._id)}
-                            disabled={!isVerified || loading}
+                            disabled={!isVerified || actionLoading[`dislike-${media._id}`]}
                             aria-label="Marquer comme non apprécié"
                           >
                             <FaThumbsDown />
