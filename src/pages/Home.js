@@ -502,6 +502,20 @@ export default function Home() {
     });
   };
 
+  const toggleVideoPlay = useCallback((mediaId) => {
+    const video = videoRefs.current.get(mediaId);
+    if (video) {
+      if (video.paused) {
+        video.play().catch((error) => {
+          console.error(`Erreur lors de la lecture de la vidéo ${mediaId}:`, error);
+          setMessage('Impossible de lire la vidéo. Veuillez réessayer.');
+        });
+      } else {
+        video.pause();
+      }
+    }
+  }, []);
+
   useEffect(() => {
     let currentPlayingVideo = null;
 
@@ -753,7 +767,7 @@ export default function Home() {
   return (
     <div className="home-container">
       <button
-        className="btn btn-outline-light btn-sm position-fixed top-0 end-0 m-2"
+        className="btn btn-outline-light btn-sm position-fixed top-0 end-0 m-2 mute-button"
         onClick={toggleMute}
         aria-label={isMuted ? 'Activer le son' : 'Couper le son'}
       >
@@ -791,9 +805,15 @@ export default function Home() {
           ) : (
             feed.map((media) => (
               <div key={media._id} className="tiktok-media fade-in">
-                <Link to={`/media/${media._id}`} className="media-link">
+                <div className="media-wrapper">
                   {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                    <img src={`${API_URL}/uploads/${media.filename}`} alt={media.originalname} className="tiktok-media-content" />
+                    <Link to={`/media/${media._id}`} className="media-link">
+                      <img
+                        src={`${API_URL}/uploads/${media.filename}`}
+                        alt={media.originalname}
+                        className="tiktok-media-content"
+                      />
+                    </Link>
                   ) : (
                     <video
                       ref={(el) => {
@@ -809,12 +829,12 @@ export default function Home() {
                       loop
                       playsInline
                       preload="metadata"
-                      volume={0.5}
                       muted={isMuted}
+                      onClick={() => toggleVideoPlay(media._id)}
                       onError={() => setMessage(`Erreur de chargement de la vidéo ${media._id}.`)}
                     />
                   )}
-                </Link>
+                </div>
                 <div className="tiktok-overlay">
                   <div className="tiktok-info">
                     <h5 className="text-white text-truncate">
@@ -1013,7 +1033,7 @@ export default function Home() {
                   <div className="tiktok-actions">
                     {media.owner?.username === username && (
                       <button
-                        className="btn btn-danger btn-sm rounded-circle mb-2"
+                        className="btn btn-danger btn-sm rounded-circle mb-2 action-button"
                         onClick={() => deleteMedia(media._id)}
                         disabled={!isVerified || actionLoading[`delete-${media._id}`]}
                         aria-label="Supprimer le média"
@@ -1025,7 +1045,7 @@ export default function Home() {
                       <>
                         {media.isLiked ? (
                           <button
-                            className="btn btn-danger btn-sm rounded-circle mb-2"
+                            className="btn btn-danger btn-sm rounded-circle mb-2 action-button"
                             onClick={() => unlikeMedia(media._id)}
                             disabled={!isVerified || actionLoading[`unlike-${media._id}`]}
                             aria-label="Retirer le like"
@@ -1034,7 +1054,7 @@ export default function Home() {
                           </button>
                         ) : (
                           <button
-                            className="btn btn-outline-danger btn-sm rounded-circle mb-2"
+                            className="btn btn-outline-danger btn-sm rounded-circle mb-2 action-button"
                             onClick={() => likeMedia(media._id)}
                             disabled={!isVerified || actionLoading[`like-${media._id}`]}
                             aria-label="Aimer le média"
@@ -1044,7 +1064,7 @@ export default function Home() {
                         )}
                         {media.isDisliked ? (
                           <button
-                            className="btn btn-warning btn-sm rounded-circle mb-2"
+                            className="btn btn-warning btn-sm rounded-circle mb-2 action-button"
                             onClick={() => undislikeMedia(media._id)}
                             disabled={!isVerified || actionLoading[`undislike-${media._id}`]}
                             aria-label="Retirer le dislike"
@@ -1053,7 +1073,7 @@ export default function Home() {
                           </button>
                         ) : (
                           <button
-                            className="btn btn-outline-warning btn-sm rounded-circle mb-2"
+                            className="btn btn-outline-warning btn-sm rounded-circle mb-2 action-button"
                             onClick={() => dislikeMedia(media._id)}
                             disabled={!isVerified || actionLoading[`dislike-${media._id}`]}
                             aria-label="Marquer comme non apprécié"
@@ -1063,7 +1083,7 @@ export default function Home() {
                         )}
                         <div className="share-button-container position-relative">
                           <button
-                            className="btn btn-outline-primary btn-sm rounded-circle mb-2"
+                            className="btn btn-outline-primary btn-sm rounded-circle mb-2 action-button"
                             onClick={() => shareMedia(media._id, media.originalname)}
                             disabled={!isVerified}
                             aria-label="Partager le média"
