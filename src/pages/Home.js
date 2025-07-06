@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaThumbsUp, FaThumbsDown, FaComment, FaEdit, FaSmile, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
+import { FaTrash, FaThumbsUp, FaThumbsDown, FaComment, FaEdit, FaSmile, FaVolumeUp, FaVolumeMute, FaShare, FaWhatsapp } from 'react-icons/fa';
 import io from 'socket.io-client';
 import './Home.css';
 
@@ -31,6 +31,7 @@ export default function Home() {
   const [selectedMedia, setSelectedMedia] = useState({});
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(null);
   const videoRefs = useRef(new Map());
   const observerRef = useRef(null);
   const navigate = useNavigate();
@@ -45,13 +46,11 @@ export default function Home() {
         console.log('Permission de notification refusée');
         return;
       }
-
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: process.env.REACT_APP_VAPID_PUBLIC_KEY,
       });
-
       await fetch(`${API_URL}/subscribe`, {
         method: 'POST',
         headers: {
@@ -471,6 +470,38 @@ export default function Home() {
     });
   };
 
+  const shareMedia = async (mediaId, mediaTitle) => {
+    const media = feed.find((m) => m._id === mediaId);
+    if (!media) return;
+    const shareUrl = `${window.location.origin}/media/${mediaId}`;
+    const shareData = {
+      title: mediaTitle || media.originalname,
+      text: media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !',
+      url: shareUrl,
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        setMessage('Contenu partagé avec succès !');
+      } catch (error) {
+        console.error('Erreur lors du partage:', error);
+        setMessage('Erreur lors du partage');
+      }
+    } else {
+      setShowShareMenu(showShareMenu === mediaId ? null : mediaId);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setMessage('Lien copié dans le presse-papiers !');
+      setShowShareMenu(null);
+    }).catch(() => {
+      setMessage('Erreur lors de la copie du lien');
+    });
+  };
+
   useEffect(() => {
     let currentPlayingVideo = null;
 
@@ -554,7 +585,7 @@ export default function Home() {
           setFeed((prev) => [
             {
               ...media,
-              owner,
+              owner: { ...owner, whatsappNumber: owner.whatsappNumber || '', whatsappMessage: owner.whatsappMessage || '' },
               likesCount: media.likes.length,
               dislikesCount: media.dislikes.length,
               isLiked: false,
@@ -760,34 +791,55 @@ export default function Home() {
           ) : (
             feed.map((media) => (
               <div key={media._id} className="tiktok-media fade-in">
-                {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                  <img src={`${API_URL}/uploads/${media.filename}`} alt={media.originalname} className="tiktok-media-content" />
-                ) : (
-                  <video
-                    ref={(el) => {
-                      if (el) {
-                        videoRefs.current.set(media._id, el);
-                        el.dataset.mediaId = media._id;
-                      } else {
-                        videoRefs.current.delete(media._id);
-                      }
-                    }}
-                    src={`${API_URL}/uploads/${media.filename}`}
-                    className="tiktok-media-content"
-                    loop
-                    playsInline
-                    preload="metadata"
-                    volume={0.5}
-                    muted={isMuted}
-                    onError={() => setMessage(`Erreur de chargement de la vidéo ${media._id}.`)}
-                  />
-                )}
+                <Link to={`/media/${media._id}`} className="media-link">
+                  {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                    <img src={`${API_URL}/uploads/${media.filename}`} alt={media.originalname} className="tiktok-media-content" />
+                  ) : (
+                    <video
+                      ref={(el) => {
+                        if (el) {
+                          videoRefs.current.set(media._id, el);
+                          el.dataset.mediaId = media._id;
+                        } else {
+                          videoRefs.current.delete(media._id);
+                        }
+                      }}
+                      src={`${API_URL}/uploads/${media.filename}`}
+                      className="tiktok-media-content"
+                      loop
+                      playsInline
+                      preload="metadata"
+                      volume={0.5}
+                      muted={isMuted}
+                      onError={() => setMessage(`Erreur de chargement de la vidéo ${media._id}.`)}
+                    />
+                  )}
+                </Link>
                 <div className="tiktok-overlay">
                   <div className="tiktok-info">
-                    <h5 className="text-white text-truncate">{media.originalname}</h5>
+                    <h5 className="text-white text-truncate">
+                      <Link to={`/media/${media._id}`} className="text-white text-decoration-none">
+                        {media.originalname}
+                      </Link>
+                    </h5>
                     <p className="text-white small">
                       Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
                     </p>
+                    {media.owner?.whatsappNumber && (
+                      <p className="text-white small">
+                        <a
+                          href={`https://wa.me/${media.owner.whatsappNumber}?text=${encodeURIComponent(
+                            `${media.owner.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'} ${window.location.origin}/media/${media._id}`
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-white"
+                          aria-label={`Contacter ${media.owner?.username || media.owner?.email} sur WhatsApp`}
+                        >
+                          <FaWhatsapp className="me-1" /> Contacter via WhatsApp
+                        </a>
+                      </p>
+                    )}
                     <p className="text-white small">Uploadé le : {new Date(media.uploadedAt).toLocaleString()}</p>
                     <p className="text-white small">
                       <FaThumbsUp className="me-1" /> {media.likesCount} Like{media.likesCount !== 1 ? 's' : ''}
@@ -972,6 +1024,57 @@ export default function Home() {
                             <FaThumbsDown />
                           </button>
                         )}
+                        <div className="share-button-container position-relative">
+                          <button
+                            className="btn btn-outline-primary btn-sm rounded-circle mb-2"
+                            onClick={() => shareMedia(media._id, media.originalname)}
+                            disabled={!isVerified}
+                            aria-label="Partager le média"
+                          >
+                            <FaShare />
+                          </button>
+                          {showShareMenu === media._id && (
+                            <div className="share-menu position-absolute">
+                              <button
+                                className="btn btn-sm btn-outline-success w-100 mb-1"
+                                onClick={() => {
+                                  const shareUrl = `${window.location.origin}/media/${media._id}`;
+                                  const message = `${media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'} ${shareUrl}`;
+                                  window.open(
+                                    `https://wa.me/?text=${encodeURIComponent(message)}`,
+                                    '_blank',
+                                    'noopener,noreferrer'
+                                  );
+                                  setShowShareMenu(null);
+                                }}
+                              >
+                                <FaWhatsapp /> WhatsApp
+                              </button>
+                              <button
+                                className="btn btn-sm btn-outline-primary w-100 mb-1"
+                                onClick={() => {
+                                  const shareUrl = `${window.location.origin}/media/${media._id}`;
+                                  window.open(
+                                    `mailto:?subject=${encodeURIComponent(media.originalname)}&body=${encodeURIComponent(
+                                      `${media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'} ${shareUrl}`
+                                    )}`,
+                                    '_blank',
+                                    'noopener,noreferrer'
+                                  );
+                                  setShowShareMenu(null);
+                                }}
+                              >
+                                Email
+                              </button>
+                              <button
+                                className="btn btn-sm btn-outline-secondary w-100"
+                                onClick={() => copyToClipboard(`${window.location.origin}/media/${media._id}`)}
+                              >
+                                Copier le lien
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>

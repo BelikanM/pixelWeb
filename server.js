@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -45,6 +44,7 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   username: { type: String, default: '' },
+  whatsappNumber: { type: String, default: '' }, // Nouveau champ pour le numéro WhatsApp
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   isVerified: { type: Boolean, default: false },
   verificationToken: { type: String },
@@ -132,7 +132,7 @@ app.post('/subscribe', verifyToken, async (req, res) => {
 
 // Inscription
 app.post('/register', async (req, res) => {
-  const { email, password, username } = req.body; // Corrected typo: Susername -> username
+  const { email, password, username, whatsappNumber } = req.body;
   const existing = await User.findOne({ email });
   if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
 
@@ -141,12 +141,19 @@ app.post('/register', async (req, res) => {
     return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
   }
 
+  // Validation du numéro WhatsApp (optionnel)
+  const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+  if (whatsappNumber && !phoneRegex.test(whatsappNumber)) {
+    return res.status(400).json({ message: 'Numéro WhatsApp invalide (format international requis, ex: +1234567890)' });
+  }
+
   const hashed = await bcrypt.hash(password, 10);
   const verificationToken = crypto.randomBytes(32).toString('hex');
   const user = await User.create({
     email,
     password: hashed,
     username: username || email.split('@')[0],
+    whatsappNumber: whatsappNumber || '',
     verificationToken,
   });
 
@@ -271,7 +278,8 @@ app.post('/login', async (req, res) => {
     user: { 
       email: user.email, 
       username: user.username, 
-      isVerified: user.isVerified 
+      isVerified: user.isVerified,
+      whatsappNumber: user.whatsappNumber // Inclure whatsappNumber
     } 
   });
 });
@@ -279,9 +287,9 @@ app.post('/login', async (req, res) => {
 // Profil utilisateur
 app.get('/profile', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('email username isVerified');
+    const user = await User.findById(req.user.userId).select('email username isVerified whatsappNumber');
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    res.json({ email: user.email, username: user.username, isVerified: user.isVerified });
+    res.json({ email: user.email, username: user.username, isVerified: user.isVerified, whatsappNumber: user.whatsappNumber });
   } catch (error) {
     console.error('Erreur /profile:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -290,7 +298,7 @@ app.get('/profile', verifyToken, async (req, res) => {
 
 // Mettre à jour le profil
 app.put('/profile', verifyToken, async (req, res) => {
-  const { username } = req.body;
+  const { username, whatsappNumber } = req.body;
   if (!username || !username.trim()) {
     return res.status(400).json({ message: 'Le nom d’utilisateur ne peut pas être vide' });
   }
@@ -300,14 +308,19 @@ app.put('/profile', verifyToken, async (req, res) => {
     return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
   }
 
+  const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+  if (whatsappNumber && !phoneRegex.test(whatsappNumber)) {
+    return res.status(400).json({ message: 'Numéro WhatsApp invalide (format international requis, ex: +1234567890)' });
+  }
+
   try {
     const user = await User.findByIdAndUpdate(
       req.user.userId,
-      { username: username.trim() },
+      { username: username.trim(), whatsappNumber: whatsappNumber || '' },
       { new: true, runValidators: true }
-    ).select('email username isVerified');
+    ).select('email username isVerified whatsappNumber');
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    res.json({ message: 'Profil mis à jour', user: { email: user.email, username: user.username, isVerified: user.isVerified } });
+    res.json({ message: 'Profil mis à jour', user: { email: user.email, username: user.username, isVerified: user.isVerified, whatsappNumber: user.whatsappNumber } });
   } catch (error) {
     console.error('Erreur /profile PUT:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -343,7 +356,7 @@ app.get('/feed', verifyToken, async (req, res) => {
     const user = await User.findById(req.user.userId);
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     const medias = await Media.find({ owner: { $in: user.following || [] } })
-      .populate('owner', 'email username')
+      .populate('owner', 'email username whatsappNumber')
       .populate('comments.author', 'username')
       .sort({ uploadedAt: -1 });
     const mediasWithLikes = medias.map(media => ({
@@ -370,7 +383,7 @@ app.get('/users', verifyToken, async (req, res) => {
         { username: { $regex: q, $options: 'i' } },
       ],
       _id: { $ne: req.user.userId },
-    }).select('email username');
+    }).select('email username whatsappNumber');
     res.json(users || []);
   } catch (error) {
     console.error('Erreur /users:', error);
@@ -381,7 +394,7 @@ app.get('/users', verifyToken, async (req, res) => {
 // Liste des followings
 app.get('/follows', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).populate('following', 'email username');
+    const user = await User.findById(req.user.userId).populate('following', 'email username whatsappNumber');
     res.json(user.following || []);
   } catch (error) {
     console.error('Erreur /follows:', error);
@@ -553,13 +566,13 @@ app.delete('/dislike/:mediaId', verifyToken, async (req, res) => {
   }
 });
 
-// Ajouter un commentaire (avec support pour texte ou média)
+// Ajouter un commentaire
 app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username pushSubscription');
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const { content } = req.body;
@@ -649,7 +662,7 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username pushSubscription');
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const comment = media.comments.id(req.params.commentId);
@@ -732,7 +745,7 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username pushSubscription');
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const comment = media.comments.id(req.params.commentId);

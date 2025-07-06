@@ -1,7 +1,6 @@
-// src/pages/Profile.js
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane } from 'react-icons/fa';
+import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp } from 'react-icons/fa';
 import './Profile.css';
 
 const API_URL = 'http://localhost:5000';
@@ -18,6 +17,7 @@ export default function Profile() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [whatsappNumber, setWhatsappNumber] = useState(''); // Nouveau champ pour le numéro WhatsApp
   const [message, setMessage] = useState('');
   const [isLogin, setIsLogin] = useState(false);
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -49,6 +49,7 @@ export default function Profile() {
         setEmail(data.email || '');
         setUsername(data.username || '');
         setEditUsername(data.username || '');
+        setWhatsappNumber(data.whatsappNumber || '');
         setIsVerified(data.isVerified || false);
       } else {
         setMessage(data.message || 'Erreur chargement profil');
@@ -327,18 +328,24 @@ export default function Profile() {
       setMessage('Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)');
       return;
     }
+    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+    if (whatsappNumber && !phoneRegex.test(whatsappNumber)) {
+      setMessage('Numéro WhatsApp invalide (format international requis, ex: +1234567890)');
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/profile`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', authorization: token },
-        body: JSON.stringify({ username: editUsername }),
+        body: JSON.stringify({ username: editUsername, whatsappNumber }),
       });
       const data = await res.json();
       if (res.ok) {
         setMessage(data.message);
         setUsername(data.user.username);
         setEditUsername(data.user.username);
+        setWhatsappNumber(data.user.whatsappNumber || '');
         setIsVerified(data.user.isVerified);
       } else {
         setMessage(data.message || 'Erreur mise à jour profil');
@@ -354,7 +361,7 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, editUsername, isVerified]);
+  }, [token, editUsername, whatsappNumber, isVerified]);
 
   // Upload média
   const handleUpload = useCallback(
@@ -417,11 +424,18 @@ export default function Profile() {
       try {
         const body = isLogin
           ? { email, password }
-          : { email, password, username: editUsername || email.split('@')[0] };
+          : { email, password, username: editUsername || email.split('@')[0], whatsappNumber };
         if (!isLogin && body.username) {
           const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
           if (!usernameRegex.test(body.username)) {
             setMessage('Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)');
+            return;
+          }
+        }
+        if (!isLogin && body.whatsappNumber) {
+          const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+          if (!phoneRegex.test(body.whatsappNumber)) {
+            setMessage('Numéro WhatsApp invalide (format international requis, ex: +1234567890)');
             return;
           }
         }
@@ -438,6 +452,7 @@ export default function Profile() {
           setEmail(data.user?.email || '');
           setUsername(data.user?.username || '');
           setEditUsername(data.user?.username || '');
+          setWhatsappNumber(data.user?.whatsappNumber || '');
           setIsVerified(data.user?.isVerified || false);
           setMessage('Connecté avec succès !');
         } else {
@@ -446,6 +461,7 @@ export default function Profile() {
           setEmail('');
           setPassword('');
           setEditUsername('');
+          setWhatsappNumber('');
         }
       } catch (err) {
         setMessage(`Erreur : ${err.message}`);
@@ -453,7 +469,7 @@ export default function Profile() {
         setLoading(false);
       }
     },
-    [email, password, isLogin, editUsername]
+    [email, password, isLogin, editUsername, whatsappNumber]
   );
 
   // Déconnexion
@@ -468,6 +484,7 @@ export default function Profile() {
     setEmail('');
     setUsername('');
     setEditUsername('');
+    setWhatsappNumber('');
     setIsVerified(false);
     setVerificationCode('');
     setMessage('Déconnecté');
@@ -483,6 +500,7 @@ export default function Profile() {
       setPassword('');
       setUsername('');
       setEditUsername('');
+      setWhatsappNumber('');
       setIsLogin(true);
       loadProfile();
       if (isVerified) {
@@ -535,18 +553,32 @@ export default function Profile() {
               />
             </div>
             {!isLogin && (
-              <div className="mb-3">
-                <label htmlFor="username" className="form-label">Nom d’utilisateur (optionnel)</label>
-                <input
-                  type="text"
-                  id="username"
-                  placeholder="Nom d’utilisateur"
-                  className="form-control"
-                  value={editUsername}
-                  onChange={(e) => setEditUsername(e.target.value)}
-                  aria-label="Nom d’utilisateur"
-                />
-              </div>
+              <>
+                <div className="mb-3">
+                  <label htmlFor="username" className="form-label">Nom d’utilisateur (optionnel)</label>
+                  <input
+                    type="text"
+                    id="username"
+                    placeholder="Nom d’utilisateur"
+                    className="form-control"
+                    value={editUsername}
+                    onChange={(e) => setEditUsername(e.target.value)}
+                    aria-label="Nom d’utilisateur"
+                  />
+                </div>
+                <div className="mb-3">
+                  <label htmlFor="whatsappNumber" className="form-label">Numéro WhatsApp (optionnel, ex: +1234567890)</label>
+                  <input
+                    type="text"
+                    id="whatsappNumber"
+                    placeholder="Numéro WhatsApp"
+                    className="form-control"
+                    value={whatsappNumber}
+                    onChange={(e) => setWhatsappNumber(e.target.value)}
+                    aria-label="Numéro WhatsApp"
+                  />
+                </div>
+              </>
             )}
             <button
               className="btn btn-primary w-100 mb-3"
@@ -703,6 +735,19 @@ export default function Profile() {
                         onChange={(e) => setEditUsername(e.target.value)}
                         disabled={!isVerified}
                         aria-label="Nom d’utilisateur"
+                      />
+                    </div>
+                    <div className="mb-3">
+                      <label htmlFor="profile-whatsapp" className="form-label">Numéro WhatsApp (optionnel)</label>
+                      <input
+                        type="text"
+                        id="profile-whatsapp"
+                        className="form-control"
+                        value={whatsappNumber}
+                        onChange={(e) => setWhatsappNumber(e.target.value)}
+                        disabled={!isVerified}
+                        placeholder="Ex: +1234567890"
+                        aria-label="Numéro WhatsApp"
                       />
                     </div>
                     <button
