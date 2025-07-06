@@ -824,6 +824,43 @@ export default function Home() {
                     </h5>
                     <p className="text-white small">
                       Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
+                      {media.owner && media.owner._id.toString() !== parseJwt(token)?.userId && (
+                        follows.includes(media.owner?._id.toString()) ? (
+                          <button
+                            className="btn btn-outline-warning btn-sm ms-2"
+                            onClick={() => unfollowUser(media.owner._id)}
+                            disabled={actionLoading[`unfollow-${media.owner._id}`]}
+                            aria-label={`Se désabonner de ${media.owner?.username || media.owner?.email}`}
+                          >
+                            {actionLoading[`unfollow-${media.owner._id}`] ? (
+                              <span
+                                className="spinner-border spinner-border-sm"
+                                role="status"
+                                aria-hidden="true"
+                              ></span>
+                            ) : (
+                              'Se désabonner'
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-outline-primary btn-sm ms-2"
+                            onClick={() => followUser(media.owner._id)}
+                            disabled={actionLoading[`follow-${media.owner._id}`]}
+                            aria-label={`Suivre ${media.owner?.username || media.owner?.email}`}
+                          >
+                            {actionLoading[`follow-${media.owner._id}`] ? (
+                              <span
+                                className="spinner-border spinner-border-sm"
+                                role="status"
+                                aria-hidden="true"
+                              ></span>
+                            ) : (
+                              'Suivre'
+                            )}
+                          </button>
+                        )
+                      )}
                     </p>
                     {media.owner?.whatsappNumber && (
                       <p className="text-white small">

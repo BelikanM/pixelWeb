@@ -44,7 +44,8 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   username: { type: String, default: '' },
-  whatsappNumber: { type: String, default: '' }, // Nouveau champ pour le numéro WhatsApp
+  whatsappNumber: { type: String, default: '' },
+  whatsappMessage: { type: String, default: 'Découvrez ce contenu sur Pixels Media !' },
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   isVerified: { type: Boolean, default: false },
   verificationToken: { type: String },
@@ -108,6 +109,154 @@ const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// Route pour la page média avec métadonnées Open Graph
+app.get('/media/:id', async (req, res) => {
+  try {
+    const media = await Media.findById(req.params.id).populate('owner', 'username email whatsappNumber whatsappMessage');
+    if (!media) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Média non trouvé - Pixels Media</title>
+          <meta property="og:title" content="Média non trouvé">
+          <meta property="og:description" content="Le média demandé n'existe pas ou a été supprimé.">
+          <meta property="og:type" content="website">
+          <meta property="og:url" content="${req.protocol}://${req.get('host')}/media/${req.params.id}">
+          <meta property="og:site_name" content="Pixels Media">
+          <meta name="twitter:card" content="summary">
+        </head>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h1>Média non trouvé</h1>
+          <p>Le média demandé n'existe pas ou a été supprimé.</p>
+          <a href="http://localhost:3000" style="color: #007bff; text-decoration: none;">Retour à l'accueil</a>
+        </body>
+        </html>
+      `);
+    }
+
+    const mediaUrl = `${req.protocol}://${req.get('host')}/uploads/${media.filename}`;
+    const pageUrl = `${req.protocol}://${req.get('host')}/media/${media._id}`;
+    const title = media.originalname || 'Média sur Pixels Media';
+    const description = media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !';
+    const isImage = media.filename.match(/\.(jpg|jpeg|png|gif)$/i);
+    const ogType = isImage ? 'image' : 'video';
+    const twitterCard = isImage ? 'summary_large_image' : 'player';
+
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="fr">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title}</title>
+        <meta property="og:title" content="${title}">
+        <meta property="og:description" content="${description}">
+        <meta property="og:url" content="${pageUrl}">
+        <meta property="og:type" content="${ogType}">
+        <meta property="og:site_name" content="Pixels Media">
+        ${isImage ? `<meta property="og:image" content="${mediaUrl}">` : `<meta property="og:video" content="${mediaUrl}">`}
+        ${isImage ? `<meta property="og:image:alt" content="${title}">` : `<meta property="og:video:type" content="video/mp4">`}
+        <meta name="twitter:card" content="${twitterCard}">
+        <meta name="twitter:title" content="${title}">
+        <meta name="twitter:description" content="${description}">
+        ${isImage ? `<meta name="twitter:image" content="${mediaUrl}">` : `<meta name="twitter:player" content="${mediaUrl}">`}
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+          }
+          .media-container {
+            max-width: 800px;
+            width: 100%;
+            padding: 20px;
+            text-align: center;
+          }
+          .media-content {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          }
+          h1 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 10px;
+          }
+          p {
+            color: #555;
+            margin-bottom: 20px;
+          }
+          a {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: bold;
+          }
+          a:hover {
+            text-decoration: underline;
+          }
+          video {
+            width: 100%;
+            max-height: 500px;
+          }
+        </style>
+        <script>
+          // Redirection vers l'application React
+          window.location.href = 'http://localhost:3000/media/${media._id}';
+        </script>
+      </head>
+      <body>
+        <div class="media-container">
+          <h1>${title}</h1>
+          <p>Par : ${media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}</p>
+          ${isImage 
+            ? `<img src="${mediaUrl}" alt="${title}" class="media-content">`
+            : `<video src="${mediaUrl}" controls autoplay muted class="media-content">
+                 <source src="${mediaUrl}" type="video/mp4">
+                 Votre navigateur ne prend pas en charge la lecture de vidéos.
+               </video>`
+          }
+          <p>Redirection vers l'application Pixels Media...</p>
+          <p><a href="http://localhost:3000">Retour à l'accueil</a></p>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Erreur /media/:id:', error);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html lang="fr">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Erreur serveur - Pixels Media</title>
+        <meta property="og:title" content="Erreur serveur">
+        <meta property="og:description" content="Une erreur est survenue. Veuillez réessayer plus tard.">
+        <meta property="og:type" content="website">
+        <meta property="og:url" content="${req.protocol}://${req.get('host')}/media/${req.params.id}">
+        <meta property="og:site_name" content="Pixels Media">
+        <meta name="twitter:card" content="summary">
+      </head>
+      <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+        <h1>Erreur serveur</h1>
+        <p>Une erreur est survenue. Veuillez réessayer plus tard.</p>
+        <a href="http://localhost:3000" style="color: #007bff; text-decoration: none;">Retour à l'accueil</a>
+      </body>
+      </html>
+    `);
+  }
+});
+
 // WebSocket : Gestion des connexions
 io.on('connection', (socket) => {
   console.log('Un utilisateur est connecté via WebSocket');
@@ -132,7 +281,7 @@ app.post('/subscribe', verifyToken, async (req, res) => {
 
 // Inscription
 app.post('/register', async (req, res) => {
-  const { email, password, username, whatsappNumber } = req.body;
+  const { email, password, username, whatsappNumber, whatsappMessage } = req.body;
   const existing = await User.findOne({ email });
   if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
 
@@ -141,7 +290,6 @@ app.post('/register', async (req, res) => {
     return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
   }
 
-  // Validation du numéro WhatsApp (optionnel)
   const phoneRegex = /^\+?[1-9]\d{1,14}$/;
   if (whatsappNumber && !phoneRegex.test(whatsappNumber)) {
     return res.status(400).json({ message: 'Numéro WhatsApp invalide (format international requis, ex: +1234567890)' });
@@ -154,6 +302,7 @@ app.post('/register', async (req, res) => {
     password: hashed,
     username: username || email.split('@')[0],
     whatsappNumber: whatsappNumber || '',
+    whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !',
     verificationToken,
   });
 
@@ -279,7 +428,8 @@ app.post('/login', async (req, res) => {
       email: user.email, 
       username: user.username, 
       isVerified: user.isVerified,
-      whatsappNumber: user.whatsappNumber // Inclure whatsappNumber
+      whatsappNumber: user.whatsappNumber,
+      whatsappMessage: user.whatsappMessage 
     } 
   });
 });
@@ -287,9 +437,15 @@ app.post('/login', async (req, res) => {
 // Profil utilisateur
 app.get('/profile', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('email username isVerified whatsappNumber');
+    const user = await User.findById(req.user.userId).select('email username isVerified whatsappNumber whatsappMessage');
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    res.json({ email: user.email, username: user.username, isVerified: user.isVerified, whatsappNumber: user.whatsappNumber });
+    res.json({ 
+      email: user.email, 
+      username: user.username, 
+      isVerified: user.isVerified, 
+      whatsappNumber: user.whatsappNumber,
+      whatsappMessage: user.whatsappMessage 
+    });
   } catch (error) {
     console.error('Erreur /profile:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -298,7 +454,7 @@ app.get('/profile', verifyToken, async (req, res) => {
 
 // Mettre à jour le profil
 app.put('/profile', verifyToken, async (req, res) => {
-  const { username, whatsappNumber } = req.body;
+  const { username, whatsappNumber, whatsappMessage } = req.body;
   if (!username || !username.trim()) {
     return res.status(400).json({ message: 'Le nom d’utilisateur ne peut pas être vide' });
   }
@@ -316,11 +472,24 @@ app.put('/profile', verifyToken, async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.user.userId,
-      { username: username.trim(), whatsappNumber: whatsappNumber || '' },
+      { 
+        username: username.trim(), 
+        whatsappNumber: whatsappNumber || '',
+        whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'
+      },
       { new: true, runValidators: true }
-    ).select('email username isVerified whatsappNumber');
+    ).select('email username isVerified whatsappNumber whatsappMessage');
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    res.json({ message: 'Profil mis à jour', user: { email: user.email, username: user.username, isVerified: user.isVerified, whatsappNumber: user.whatsappNumber } });
+    res.json({ 
+      message: 'Profil mis à jour', 
+      user: { 
+        email: user.email, 
+        username: user.username, 
+        isVerified: user.isVerified, 
+        whatsappNumber: user.whatsappNumber,
+        whatsappMessage: user.whatsappMessage 
+      } 
+    });
   } catch (error) {
     console.error('Erreur /profile PUT:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -356,7 +525,7 @@ app.get('/feed', verifyToken, async (req, res) => {
     const user = await User.findById(req.user.userId);
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     const medias = await Media.find({ owner: { $in: user.following || [] } })
-      .populate('owner', 'email username whatsappNumber')
+      .populate('owner', 'email username whatsappNumber whatsappMessage')
       .populate('comments.author', 'username')
       .sort({ uploadedAt: -1 });
     const mediasWithLikes = medias.map(media => ({
@@ -383,7 +552,7 @@ app.get('/users', verifyToken, async (req, res) => {
         { username: { $regex: q, $options: 'i' } },
       ],
       _id: { $ne: req.user.userId },
-    }).select('email username whatsappNumber');
+    }).select('email username whatsappNumber whatsappMessage');
     res.json(users || []);
   } catch (error) {
     console.error('Erreur /users:', error);
@@ -394,7 +563,7 @@ app.get('/users', verifyToken, async (req, res) => {
 // Liste des followings
 app.get('/follows', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).populate('following', 'email username whatsappNumber');
+    const user = await User.findById(req.user.userId).populate('following', 'email username whatsappNumber whatsappMessage');
     res.json(user.following || []);
   } catch (error) {
     console.error('Erreur /follows:', error);
@@ -572,7 +741,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber pushSubscription');
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const { content } = req.body;
@@ -662,7 +831,7 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber pushSubscription');
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const comment = media.comments.id(req.params.commentId);
@@ -745,7 +914,7 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber pushSubscription');
+    const media = await Media.findById(req.params.mediaId).populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const comment = media.comments.id(req.params.commentId);
