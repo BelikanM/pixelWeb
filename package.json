@@ -8,6 +8,7 @@
     "bootstrap": "^5.3.7",
     "bootstrap-icons": "^1.13.1",
     "chart.js": "^4.5.0",
+    "cloudinary": "^2.7.0",
     "connect-mongo": "^5.1.0",
     "cors": "^2.8.5",
     "cra-template-pwa": "2.0.0",
@@ -19,6 +20,7 @@
     "multer": "^2.0.1",
     "nodemailer": "^7.0.4",
     "react": "^19.1.0",
+    "react-bootstrap": "^2.10.10",
     "react-chartjs-2": "^5.3.0",
     "react-dom": "^19.1.0",
     "react-icons": "^5.5.0",
@@ -37,8 +39,9 @@
     "workbox-strategies": "^7.3.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "start": "node server.js",
+    "start": "concurrently \"npm run client\" \"npm run server\"",
+    "client": "react-scripts start",
+    "server": "node server.js",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
@@ -61,5 +64,8 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
   }
 }
