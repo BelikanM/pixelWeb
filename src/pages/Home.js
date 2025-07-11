@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaThumbsUp, FaThumbsDown, FaComment, FaEdit, FaSmile, FaVolumeUp, FaVolumeMute, FaShare, FaWhatsapp } from 'react-icons/fa';
+import { FaTrash, FaThumbsUp, FaThumbsDown, FaComment, FaEdit, FaSmile, FaVolumeUp, FaVolumeMute, FaShare, FaWhatsapp, FaUser } from 'react-icons/fa';
 import io from 'socket.io-client';
 import './Home.css';
 
@@ -599,7 +599,7 @@ export default function Home() {
           setFeed((prev) => [
             {
               ...media,
-              owner: { ...owner, whatsappNumber: owner.whatsappNumber || '', whatsappMessage: owner.whatsappMessage || '' },
+              owner: { ...owner, whatsappNumber: owner.whatsappNumber || '', whatsappMessage: owner.whatsappMessage || '', profilePicture: owner.profilePicture || '' },
               likesCount: media.likes.length,
               dislikesCount: media.dislikes.length,
               isLiked: false,
@@ -694,7 +694,7 @@ export default function Home() {
                             new Date(c.createdAt).getTime() === new Date(comment.createdAt).getTime())
                         )
                     ),
-                    comment,
+                    { ...comment, author: { ...comment.author, profilePicture: comment.author.profilePicture || '' } },
                   ],
                 }
               : media
@@ -842,7 +842,17 @@ export default function Home() {
                         {media.originalname}
                       </Link>
                     </h5>
-                    <p className="text-white small">
+                    <p className="text-white small d-flex align-items-center">
+                      {media.owner?.profilePicture ? (
+                        <img
+                          src={`${API_URL}/uploads/profiles/${media.owner.profilePicture}`}
+                          alt={`Photo de profil de ${media.owner?.username || media.owner?.email}`}
+                          className="rounded-circle me-2"
+                          style={{ width: '30px', height: '30px', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <FaUser className="me-2" style={{ fontSize: '30px' }} />
+                      )}
                       Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
                       {media.owner && media.owner._id.toString() !== parseJwt(token)?.userId && (
                         follows.includes(media.owner?._id.toString()) ? (

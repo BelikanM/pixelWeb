@@ -20,15 +20,15 @@ const io = new Server(server, {
     origin: 'http://localhost:3000',
     methods: ['GET', 'POST', 'DELETE', 'PUT'],
   },
-  pingTimeout: 60000, // Augmente le délai d'attente pour éviter les déconnexions
-  pingInterval: 25000, // Intervalle de ping pour maintenir la connexion
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
   setHeaders: (res) => {
-    res.set('Cache-Control', 'public, max-age=3600'); // Cache les fichiers pendant 1 heure
+    res.set('Cache-Control', 'public, max-age=3600');
   }
 }));
 
@@ -59,6 +59,7 @@ const userSchema = new mongoose.Schema({
   verificationCode: { type: String },
   verificationCodeExpires: { type: Date },
   pushSubscription: { type: Object },
+  profilePicture: { type: String, default: '' }, // Nouveau champ pour la photo de profil
 });
 const User = mongoose.model('User', userSchema);
 
@@ -101,7 +102,7 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Multer config
+// Multer config pour médias
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadPath = path.join(__dirname, 'Uploads');
@@ -132,6 +133,37 @@ const upload = multer({
   }
 });
 
+// Multer config pour photo de profil
+const profileStorage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    const uploadPath = path.join(__dirname, 'Uploads', 'profiles');
+    try {
+      await fs.mkdir(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    } catch (err) {
+      cb(err);
+    }
+  },
+  filename: (req, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, unique + '-' + file.originalname);
+  },
+});
+const uploadProfile = multer({
+  storage: profileStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // Limite de 5MB pour la photo de profil
+  fileFilter: (req, file, cb) => {
+    const fileTypes = /jpeg|jpg|png/;
+    const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = fileTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error('Seules les images (jpeg, jpg, png) sont autorisées'));
+    }
+  }
+});
+
 // Générer un code de vérification
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -152,7 +184,7 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   console.log(`Utilisateur ${socket.userId} connecté via WebSocket`);
-  socket.join(socket.userId); // Rejoindre une room spécifique à l'utilisateur
+  socket.join(socket.userId);
   socket.on('disconnect', () => console.log(`Utilisateur ${socket.userId} déconnecté`));
 });
 
@@ -160,7 +192,7 @@ io.on('connection', (socket) => {
 app.get('/media/:id', async (req, res) => {
   try {
     const media = await Media.findById(req.params.id)
-      .populate('owner', 'username email whatsappNumber whatsappMessage')
+      .populate('owner', 'username email whatsappNumber whatsappMessage profilePicture')
       .lean();
     if (!media) {
       return res.status(404).send(`
@@ -346,6 +378,7 @@ app.post('/register', async (req, res) => {
     whatsappNumber: whatsappNumber || '',
     whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !',
     verificationToken,
+    profilePicture: '', // Initialisation de la photo de profil
   });
 
   const verificationLink = `http://localhost:5000/verify-email?token=${verificationToken}`;
@@ -471,7 +504,8 @@ app.post('/login', async (req, res) => {
       username: user.username, 
       isVerified: user.isVerified,
       whatsappNumber: user.whatsappNumber,
-      whatsappMessage: user.whatsappMessage 
+      whatsappMessage: user.whatsappMessage,
+      profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : ''
     } 
   });
 });
@@ -480,10 +514,13 @@ app.post('/login', async (req, res) => {
 app.get('/profile', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
-      .select('email username isVerified whatsappNumber whatsappMessage')
+      .select('email username isVerified whatsappNumber whatsappMessage profilePicture')
       .lean();
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    res.json(user);
+    res.json({
+      ...user,
+      profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : ''
+    });
   } catch (error) {
     console.error('Erreur /profile:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -491,7 +528,7 @@ app.get('/profile', verifyToken, async (req, res) => {
 });
 
 // Mettre à jour le profil
-app.put('/profile', verifyToken, async (req, res) => {
+app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (req, res) => {
   const { username, whatsappNumber, whatsappMessage } = req.body;
   if (!username || !username.trim()) {
     return res.status(400).json({ message: 'Le nom d’utilisateur ne peut pas être vide' });
@@ -508,17 +545,38 @@ app.put('/profile', verifyToken, async (req, res) => {
   }
 
   try {
-    const user = await User.findByIdAndUpdate(
-      req.user.userId,
-      { 
-        username: username.trim(), 
-        whatsappNumber: whatsappNumber || '',
-        whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'
-      },
-      { new: true, runValidators: true }
-    ).select('email username isVerified whatsappNumber whatsappMessage').lean();
+    const user = await User.findById(req.user.userId);
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    res.json({ message: 'Profil mis à jour', user });
+
+    // Supprimer l'ancienne photo de profil si une nouvelle est uploadée
+    if (req.file && user.profilePicture) {
+      try {
+        await fs.unlink(path.join(__dirname, 'Uploads', 'profiles', user.profilePicture));
+      } catch (err) {
+        console.error(`Erreur lors de la suppression de l'ancienne photo de profil ${user.profilePicture}:`, err);
+      }
+    }
+
+    const updatedData = {
+      username: username.trim(),
+      whatsappNumber: whatsappNumber || '',
+      whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !',
+      profilePicture: req.file ? req.file.filename : user.profilePicture
+    };
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.userId,
+      updatedData,
+      { new: true, runValidators: true }
+    ).select('email username isVerified whatsappNumber whatsappMessage profilePicture').lean();
+
+    res.json({
+      message: 'Profil mis à jour',
+      user: {
+        ...updatedUser,
+        profilePicture: updatedUser.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${updatedUser.profilePicture}` : ''
+      }
+    });
   } catch (error) {
     console.error('Erreur /profile PUT:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -541,10 +599,25 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
       comments: [],
     });
     const populatedMedia = await Media.findById(media._id)
-      .populate('owner', 'email username whatsappNumber whatsappMessage')
+      .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
       .lean();
-    res.status(201).json({ message: 'Fichier uploadé', media: populatedMedia });
-    io.to(user._id.toString()).emit('newMedia', { media: populatedMedia, owner: user });
+    res.status(201).json({ message: 'Fichier uploadé', media: {
+      ...populatedMedia,
+      owner: {
+        ...populatedMedia.owner,
+        profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
+      }
+    } });
+    io.to(user._id.toString()).emit('newMedia', { 
+      media: {
+        ...populatedMedia,
+        owner: {
+          ...populatedMedia.owner,
+          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
+        }
+      }, 
+      owner: user 
+    });
   } catch (error) {
     console.error('Erreur /upload:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -557,8 +630,8 @@ app.get('/feed', verifyToken, async (req, res) => {
     const user = await User.findById(req.user.userId).lean();
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     const medias = await Media.find({ owner: { $in: user.following || [] } })
-      .populate('owner', 'email username whatsappNumber whatsappMessage')
-      .populate('comments.author', 'username')
+      .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
+      .populate('comments.author', 'username profilePicture')
       .sort({ uploadedAt: -1 })
       .lean();
     const mediasWithLikes = medias.map(media => ({
@@ -567,6 +640,17 @@ app.get('/feed', verifyToken, async (req, res) => {
       dislikesCount: media.dislikes.length,
       isLiked: media.likes.some(id => id.toString() === req.user.userId),
       isDisliked: media.dislikes.some(id => id.toString() === req.user.userId),
+      owner: {
+        ...media.owner,
+        profilePicture: media.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${media.owner.profilePicture}` : ''
+      },
+      comments: media.comments.map(comment => ({
+        ...comment,
+        author: {
+          ...comment.author,
+          profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
+        }
+      }))
     }));
     res.json(mediasWithLikes || []);
   } catch (error) {
@@ -585,8 +669,11 @@ app.get('/users', verifyToken, async (req, res) => {
         { username: { $regex: q, $options: 'i' } },
       ],
       _id: { $ne: req.user.userId },
-    }).select('email username whatsappNumber whatsappMessage').lean();
-    res.json(users || []);
+    }).select('email username whatsappNumber whatsappMessage profilePicture').lean();
+    res.json(users.map(user => ({
+      ...user,
+      profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : ''
+    })) || []);
   } catch (error) {
     console.error('Erreur /users:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -597,9 +684,12 @@ app.get('/users', verifyToken, async (req, res) => {
 app.get('/follows', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
-      .populate('following', 'email username whatsappNumber whatsappMessage')
+      .populate('following', 'email username whatsappNumber whatsappMessage profilePicture')
       .lean();
-    res.json(user.following || []);
+    res.json(user.following.map(follow => ({
+      ...follow,
+      profilePicture: follow.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${follow.profilePicture}` : ''
+    })) || []);
   } catch (error) {
     console.error('Erreur /follows:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -658,9 +748,15 @@ app.put('/media/:id', verifyToken, async (req, res) => {
     media.originalname = req.body.originalname;
     await media.save();
     const populatedMedia = await Media.findById(req.params.id)
-      .populate('owner', 'email username whatsappNumber whatsappMessage')
+      .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
       .lean();
-    res.json({ message: 'Nom mis à jour', media: populatedMedia });
+    res.json({ message: 'Nom mis à jour', media: {
+      ...populatedMedia,
+      owner: {
+        ...populatedMedia.owner,
+        profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
+      }
+    } });
   } catch (error) {
     console.error('Erreur /media/:id PUT:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -802,7 +898,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
     const media = await Media.findById(req.params.mediaId)
-      .populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription');
+      .populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription profilePicture');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const { content } = req.body;
@@ -866,14 +962,20 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     }
 
     const updatedMedia = await Media.findById(req.params.mediaId)
-      .populate('comments.author', 'username')
+      .populate('comments.author', 'username profilePicture')
       .lean();
-    res.json({ message: 'Commentaire ajouté', comments: updatedMedia.comments });
+    res.json({ message: 'Commentaire ajouté', comments: updatedMedia.comments.map(comment => ({
+      ...comment,
+      author: {
+        ...comment.author,
+        profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
+      }
+    })) });
     io.emit('commentUpdate', {
       mediaId: req.params.mediaId,
       comment: {
         ...newComment,
-        author: { _id: req.user.userId, username: user.username },
+        author: { _id: req.user.userId, username: user.username, profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : '' },
       },
     });
   } catch (error) {
@@ -889,7 +991,7 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
     const media = await Media.findById(req.params.mediaId)
-      .populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription');
+      .populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription profilePicture');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const comment = media.comments.id(req.params.commentId);
@@ -901,6 +1003,15 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     const { content } = req.body;
     if (!content && !req.file) {
       return res.status(400).json({ message: 'Le commentaire ou le média ne peut pas être vide' });
+    }
+
+    // Supprimer l'ancienne média du commentaire si une nouvelle est uploadée
+    if (req.file && comment.media) {
+      try {
+        await fs.unlink(path.join(__dirname, 'Uploads', comment.media));
+      } catch (err) {
+        console.error(`Erreur lors de la suppression de l'ancienne média du commentaire ${comment.media}:`, err);
+      }
     }
 
     comment.content = content ? content.trim() : '';
@@ -946,16 +1057,22 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     }
 
     const updatedMedia = await Media.findById(req.params.mediaId)
-      .populate('comments.author', 'username')
+      .populate('comments.author', 'username profilePicture')
       .lean();
-    res.json({ message: 'Commentaire modifié', comments: updatedMedia.comments });
+    res.json({ message: 'Commentaire modifié', comments: updatedMedia.comments.map(comment => ({
+      ...comment,
+      author: {
+        ...comment.author,
+        profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
+      }
+    })) });
     io.emit('commentUpdate', {
       mediaId: req.params.mediaId,
       comment: {
         _id: req.params.commentId,
         content: content ? content.trim() : '',
         media: req.file ? req.file.filename : comment.media,
-        author: { _id: req.user.userId, username: user.username },
+        author: { _id: req.user.userId, username: user.username, profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : '' },
         createdAt: new Date(),
       },
     });
@@ -972,13 +1089,21 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
     const media = await Media.findById(req.params.mediaId)
-      .populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription');
+      .populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription profilePicture');
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const comment = media.comments.id(req.params.commentId);
     if (!comment) return res.status(404).json({ message: 'Commentaire non trouvé' });
     if (comment.author.toString() !== req.user.userId) {
       return res.status(403).json({ message: 'Non autorisé à supprimer ce commentaire' });
+    }
+
+    if (comment.media) {
+      try {
+        await fs.unlink(path.join(__dirname, 'Uploads', comment.media));
+      } catch (err) {
+        console.error(`Erreur lors de la suppression du média du commentaire ${comment.media}:`, err);
+      }
     }
 
     media.comments.pull(req.params.commentId);
