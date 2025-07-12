@@ -59,7 +59,7 @@ const userSchema = new mongoose.Schema({
   verificationCode: { type: String },
   verificationCodeExpires: { type: Date },
   pushSubscription: { type: Object },
-  profilePicture: { type: String, default: '' }, // Nouveau champ pour la photo de profil
+  profilePicture: { type: String, default: '' },
 });
 const User = mongoose.model('User', userSchema);
 
@@ -378,7 +378,7 @@ app.post('/register', async (req, res) => {
     whatsappNumber: whatsappNumber || '',
     whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !',
     verificationToken,
-    profilePicture: '', // Initialisation de la photo de profil
+    profilePicture: '',
   });
 
   const verificationLink = `http://localhost:5000/verify-email?token=${verificationToken}`;
@@ -551,7 +551,9 @@ app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (
     // Supprimer l'ancienne photo de profil si une nouvelle est uploadée
     if (req.file && user.profilePicture) {
       try {
-        await fs.unlink(path.join(__dirname, 'Uploads', 'profiles', user.profilePicture));
+        const oldProfilePicturePath = path.join(__dirname, 'Uploads', 'profiles', user.profilePicture);
+        await fs.access(oldProfilePicturePath); // Vérifie si le fichier existe
+        await fs.unlink(oldProfilePicturePath);
       } catch (err) {
         console.error(`Erreur lors de la suppression de l'ancienne photo de profil ${user.profilePicture}:`, err);
       }
@@ -1157,6 +1159,7 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
 app.get('/disk-usage', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
     const medias = await Media.find({ owner: req.user.userId }).lean();
@@ -1164,7 +1167,9 @@ app.get('/disk-usage', verifyToken, async (req, res) => {
 
     for (const media of medias) {
       try {
-        const stats = await fs.stat(path.join(__dirname, 'Uploads', media.filename));
+        const filePath = path.join(__dirname, 'Uploads', media.filename);
+        await fs.access(filePath); // Vérifie si le fichier existe
+        const stats = await fs.stat(filePath);
         totalSize += stats.size;
       } catch (err) {
         console.error(`Erreur lors de la lecture du fichier ${media.filename}:`, err);
@@ -1173,7 +1178,9 @@ app.get('/disk-usage', verifyToken, async (req, res) => {
 
     if (user.profilePicture) {
       try {
-        const stats = await fs.stat(path.join(__dirname, 'Uploads', 'profiles', user.profilePicture));
+        const profilePicturePath = path.join(__dirname, 'Uploads', 'profiles', user.profilePicture);
+        await fs.access(profilePicturePath); // Vérifie si le fichier existe
+        const stats = await fs.stat(profilePicturePath);
         totalSize += stats.size;
       } catch (err) {
         console.error(`Erreur lors de la lecture de la photo de profil ${user.profilePicture}:`, err);

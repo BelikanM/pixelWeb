@@ -45,7 +45,7 @@ export default function Profile() {
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/profile`, {
-        headers: { authorization: token },
+        headers: { Authorization: token },
       });
       const data = await res.json();
       if (res.ok) {
@@ -54,7 +54,7 @@ export default function Profile() {
         setEditUsername(data.username || '');
         setWhatsappNumber(data.whatsappNumber || '');
         setIsVerified(data.isVerified || false);
-        setProfilePicture(data.profilePicture || '');
+        setProfilePicture(data.profilePicture || ''); // URL complète ou vide
       } else {
         setMessage(data.message || 'Erreur chargement profil');
         if (res.status === 401 || res.status === 403) {
@@ -77,7 +77,7 @@ export default function Profile() {
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/disk-usage`, {
-        headers: { authorization: token },
+        headers: { Authorization: token },
       });
       const data = await res.json();
       if (res.ok) {
@@ -103,7 +103,7 @@ export default function Profile() {
     try {
       const res = await fetch(`${API_URL}/request-verification`, {
         method: 'POST',
-        headers: { authorization: token },
+        headers: { Authorization: token },
       });
       const data = await res.json();
       setMessage(data.message || 'Erreur lors de la demande de code');
@@ -124,7 +124,7 @@ export default function Profile() {
     try {
       const res = await fetch(`${API_URL}/verify-code`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', authorization: token },
+        headers: { 'Content-Type': 'application/json', Authorization: token },
         body: JSON.stringify({ code: verificationCode }),
       });
       const data = await res.json();
@@ -149,7 +149,7 @@ export default function Profile() {
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/users?q=${encodeURIComponent(q)}`, {
-        headers: { authorization: token },
+        headers: { Authorization: token },
       });
       const data = await res.json();
       setUsers(Array.isArray(data) ? data.filter((u) => u._id !== userId) : []);
@@ -166,7 +166,7 @@ export default function Profile() {
     if (!token || !isVerified) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/follows`, { headers: { authorization: token } });
+      const res = await fetch(`${API_URL}/follows`, { headers: { Authorization: token } });
       const data = await res.json();
       setFollows(Array.isArray(data) ? data.map((u) => u._id) : []);
     } catch {
@@ -182,7 +182,7 @@ export default function Profile() {
     if (!token || !isVerified) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/feed`, { headers: { authorization: token } });
+      const res = await fetch(`${API_URL}/feed`, { headers: { Authorization: token } });
       const data = await res.json();
       setFeed(Array.isArray(data) ? data : []);
     } catch {
@@ -198,7 +198,7 @@ export default function Profile() {
     if (!token || !isVerified) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/my-medias`, { headers: { authorization: token } });
+      const res = await fetch(`${API_URL}/my-medias`, { headers: { Authorization: token } });
       const data = await res.json();
       setMyMedias(Array.isArray(data) ? data : []);
     } catch {
@@ -219,7 +219,7 @@ export default function Profile() {
     try {
       const res = await fetch(`${API_URL}/follow`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', authorization: token },
+        headers: { 'Content-Type': 'application/json', Authorization: token },
         body: JSON.stringify({ followingId: id }),
       });
       const data = await res.json();
@@ -247,7 +247,7 @@ export default function Profile() {
     try {
       const res = await fetch(`${API_URL}/follow`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', authorization: token },
+        headers: { 'Content-Type': 'application/json', Authorization: token },
         body: JSON.stringify({ followingId: id }),
       });
       const data = await res.json();
@@ -276,7 +276,7 @@ export default function Profile() {
     try {
       const res = await fetch(`${API_URL}/media/${id}`, {
         method: 'DELETE',
-        headers: { authorization: token },
+        headers: { Authorization: token },
       });
       const data = await res.json();
       if (res.ok) {
@@ -321,7 +321,7 @@ export default function Profile() {
       try {
         const res = await fetch(`${API_URL}/media/${id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', authorization: token },
+          headers: { 'Content-Type': 'application/json', Authorization: token },
           body: JSON.stringify({ originalname: newName }),
         });
         const data = await res.json();
@@ -374,7 +374,7 @@ export default function Profile() {
 
       const res = await fetch(`${API_URL}/profile`, {
         method: 'PUT',
-        headers: { authorization: useState },
+        headers: { Authorization: token }, // Correction : utiliser le token
         body: formData,
       });
       const data = await res.json();
@@ -384,8 +384,11 @@ export default function Profile() {
         setEditUsername(data.user.username);
         setWhatsappNumber(data.user.whatsappNumber || '');
         setIsVerified(data.user.isVerified);
-        setProfilePicture(data.user.profilePicture || '');
+        // Construire l'URL complète si nécessaire
+        setProfilePicture(data.user.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
         setSelectedProfilePicture(null);
+        loadProfile(); // Recharger le profil pour garantir la synchronisation
+        loadDiskUsage(); // Mettre à jour l'utilisation du disque
       } else {
         setMessage(data.message || 'Erreur mise à jour profil');
         if (res.status === 401 || res.status === 403) {
@@ -400,7 +403,7 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, editUsername, whatsappNumber, selectedProfilePicture, isVerified]);
+  }, [token, editUsername, whatsappNumber, selectedProfilePicture, isVerified, loadProfile, loadDiskUsage]);
 
   // Upload média
   const handleUpload = useCallback(
@@ -420,7 +423,7 @@ export default function Profile() {
       try {
         const res = await fetch(`${API_URL}/upload`, {
           method: 'POST',
-          headers: { authorization: token },
+          headers: { Authorization: token },
           body: formData,
         });
         const data = await res.json();
@@ -494,7 +497,7 @@ export default function Profile() {
           setEditUsername(data.user?.username || '');
           setWhatsappNumber(data.user?.whatsappNumber || '');
           setIsVerified(data.user?.isVerified || false);
-          setProfilePicture(data.user?.profilePicture || '');
+          setProfilePicture(data.user?.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
           setMessage('Connecté avec succès !');
         } else {
           setMessage('Inscription réussie. Vérifiez votre email pour activer votre compte.');
@@ -539,7 +542,8 @@ export default function Profile() {
     const file = e.target.files[0];
     if (file) {
       setSelectedProfilePicture(file);
-      setProfilePicture(URL.createObjectURL(file)); // Aperçu local
+      // Ne pas définir profilePicture ici pour éviter l'aperçu local non persistant
+      // setProfilePicture(URL.createObjectURL(file));
     }
   };
 
