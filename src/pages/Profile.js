@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera } from 'react-icons/fa';
+import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera, FaChartPie } from 'react-icons/fa';
 import './Profile.css';
 
 const API_URL = 'http://localhost:5000';
@@ -37,6 +37,7 @@ export default function Profile() {
   const [activeTab, setActiveTab] = useState('profile');
   const [profilePicture, setProfilePicture] = useState('');
   const [selectedProfilePicture, setSelectedProfilePicture] = useState(null);
+  const [diskUsage, setDiskUsage] = useState({ used: 0, total: 5 * 1024 * 1024 * 1024, remaining: 0 }); // 5GB en octets
 
   // Charger profil utilisateur
   const loadProfile = useCallback(async () => {
@@ -69,6 +70,31 @@ export default function Profile() {
       setLoading(false);
     }
   }, [token]);
+
+  // Charger les informations d'utilisation du disque
+  const loadDiskUsage = useCallback(async () => {
+    if (!token || !isVerified) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/disk-usage`, {
+        headers: { authorization: token },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDiskUsage({
+          used: data.used,
+          total: 5 * 1024 * 1024 * 1024, // 5GB
+          remaining: 5 * 1024 * 1024 * 1024 - data.used,
+        });
+      } else {
+        setMessage(data.message || 'Erreur lors du chargement des données d’espace disque');
+      }
+    } catch {
+      setMessage('Erreur réseau lors du chargement des données d’espace disque');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, isVerified]);
 
   // Demander un nouveau code de vérification
   const requestVerificationCode = useCallback(async () => {
@@ -257,6 +283,7 @@ export default function Profile() {
         setMessage(data.message);
         loadMyMedias();
         loadFeed();
+        loadDiskUsage(); // Mettre à jour l'utilisation du disque après suppression
       } else {
         setMessage(data.message || 'Erreur suppression');
       }
@@ -265,7 +292,7 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, loadMyMedias, loadFeed, isVerified]);
+  }, [token, loadMyMedias, loadFeed, loadDiskUsage, isVerified]);
 
   // Début édition nom média
   const startEditMedia = useCallback((media) => {
@@ -347,7 +374,7 @@ export default function Profile() {
 
       const res = await fetch(`${API_URL}/profile`, {
         method: 'PUT',
-        headers: { authorization: token },
+        headers: { authorization: useState },
         body: formData,
       });
       const data = await res.json();
@@ -402,6 +429,7 @@ export default function Profile() {
           setFile(null);
           loadFeed();
           loadMyMedias();
+          loadDiskUsage(); // Mettre à jour l'utilisation du disque après upload
         } else {
           setMessage(data.message || 'Erreur upload');
         }
@@ -411,7 +439,7 @@ export default function Profile() {
         setLoading(false);
       }
     },
-    [token, file, loadFeed, loadMyMedias, isVerified]
+    [token, file, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
   );
 
   // Recherche utilisateurs
@@ -502,6 +530,7 @@ export default function Profile() {
     setIsVerified(false);
     setVerificationCode('');
     setProfilePicture('');
+    setDiskUsage({ used: 0, total: 5 * 1024 * 1024 * 1024, remaining: 0 });
     setMessage('Déconnecté');
   }, []);
 
@@ -512,6 +541,18 @@ export default function Profile() {
       setSelectedProfilePicture(file);
       setProfilePicture(URL.createObjectURL(file)); // Aperçu local
     }
+  };
+
+  // Convertir octets en unité lisible
+  const formatBytes = (bytes) => {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    return `${value.toFixed(2)} ${units[unitIndex]}`;
   };
 
   // Chargement initial
@@ -533,9 +574,10 @@ export default function Profile() {
         loadFeed();
         loadMyMedias();
         loadUsers('');
+        loadDiskUsage();
       }
     }
-  }, [token, loadProfile, loadFollows, loadFeed, loadMyMedias, loadUsers, isVerified]);
+  }, [token, loadProfile, loadFollows, loadFeed, loadMyMedias, loadUsers, loadDiskUsage, isVerified]);
 
   return (
     <div className="container mt-4" style={{ maxWidth: 900 }}>
@@ -745,6 +787,16 @@ export default function Profile() {
                 aria-label="Mes médias"
               >
                 Mes médias
+              </button>
+            </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link ${activeTab === 'dashboard' ? 'active' : ''}`}
+                onClick={() => setActiveTab('dashboard')}
+                disabled={!isVerified}
+                aria-label="Tableau de bord"
+              >
+                Tableau de bord
               </button>
             </li>
           </ul>
@@ -1042,6 +1094,42 @@ export default function Profile() {
                   </div>
                 ))
               )}
+            </div>
+          )}
+
+          {activeTab === 'dashboard' && isVerified && (
+            <div className="card p-4 bg-light text-dark rounded shadow-sm">
+              <h4>Tableau de bord</h4>
+              <div className="mb-3">
+                <h5>Espace disque</h5>
+                <p>Espace utilisé : {formatBytes(diskUsage.used)}</p>
+                <p>Espace total alloué : {formatBytes(diskUsage.total)}</p>
+                <p>Espace restant : {formatBytes(diskUsage.remaining)}</p>
+                <div className="progress">
+                  <div
+                    className="progress-bar"
+                    role="progressbar"
+                    style={{ width: `${(diskUsage.used / diskUsage.total) * 100}%` }}
+                    aria-valuenow={(diskUsage.used / diskUsage.total) * 100}
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                  >
+                    {((diskUsage.used / diskUsage.total) * 100).toFixed(2)}%
+                  </div>
+                </div>
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={loadDiskUsage}
+                disabled={loading}
+                aria-label="Rafraîchir les données d’espace disque"
+              >
+                {loading ? (
+                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                ) : (
+                  <><FaChartPie className="me-1" /> Rafraîchir</>
+                )}
+              </button>
             </div>
           )}
         </>

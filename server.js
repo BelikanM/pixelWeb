@@ -1153,6 +1153,40 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
   }
 });
 
+// Route pour récupérer l'utilisation de l'espace disque
+app.get('/disk-usage', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+
+    const medias = await Media.find({ owner: req.user.userId }).lean();
+    let totalSize = 0;
+
+    for (const media of medias) {
+      try {
+        const stats = await fs.stat(path.join(__dirname, 'Uploads', media.filename));
+        totalSize += stats.size;
+      } catch (err) {
+        console.error(`Erreur lors de la lecture du fichier ${media.filename}:`, err);
+      }
+    }
+
+    if (user.profilePicture) {
+      try {
+        const stats = await fs.stat(path.join(__dirname, 'Uploads', 'profiles', user.profilePicture));
+        totalSize += stats.size;
+      } catch (err) {
+        console.error(`Erreur lors de la lecture de la photo de profil ${user.profilePicture}:`, err);
+      }
+    }
+
+    res.json({ used: totalSize });
+  } catch (error) {
+    console.error('Erreur /disk-usage:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
 // Lancement serveur
 const PORT = process.env.SERVER_PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Serveur actif sur http://localhost:${PORT}`));
