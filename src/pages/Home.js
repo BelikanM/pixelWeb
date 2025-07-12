@@ -20,6 +20,7 @@ export default function Home() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [username, setUsername] = useState('');
   const [isVerified, setIsVerified] = useState(false);
+  const [profilePicture, setProfilePicture] = useState('');
   const [feed, setFeed] = useState([]);
   const [follows, setFollows] = useState([]);
   const [message, setMessage] = useState('');
@@ -76,9 +77,10 @@ export default function Home() {
       if (res.ok) {
         setUsername(data.username || data.email || 'Utilisateur');
         setIsVerified(data.isVerified || false);
+        setProfilePicture(data.profilePicture || '');
       } else {
         setMessage(data.message || 'Erreur chargement profil');
-        if (res.status === 404 || res.status === 403) {
+        if (res.status === 401 || res.status === 403) {
           localStorage.removeItem('token');
           setToken(null);
           setMessage('Session invalide, veuillez vous reconnecter');
@@ -99,7 +101,13 @@ export default function Home() {
       const res = await fetch(`${API_URL}/feed`, { headers: { authorization: token } });
       const data = await res.json();
       if (Array.isArray(data)) {
-        setFeed(data);
+        setFeed(data.map((media) => ({
+          ...media,
+          owner: {
+            ...media.owner,
+            profilePicture: media.owner?.profilePicture || '',
+          },
+        })));
         if (data.length === 0) {
           setMessage('Aucun contenu à afficher. Suivez des utilisateurs pour voir leurs médias.');
         }
@@ -150,6 +158,7 @@ export default function Home() {
         if (res.ok) {
           setMessage(data.message);
           setFollows((prev) => [...new Set([...prev, id.toString()])]);
+          loadFeed(); // Recharger le feed pour inclure les nouveaux médias
         } else {
           setMessage(data.message || 'Erreur lors de l’abonnement');
         }
@@ -159,7 +168,7 @@ export default function Home() {
         setActionLoading((prev) => ({ ...prev, [`follow-${id}`]: false }));
       }
     },
-    [token, isVerified]
+    [token, isVerified, loadFeed]
   );
 
   const unfollowUser = useCallback(
@@ -349,7 +358,6 @@ export default function Home() {
       }
       setSubmittingComment((prev) => ({ ...prev, [mediaId]: true }));
       try {
-        console.log(`Envoi du commentaire pour média ${mediaId}: ${content || 'Média'}`);
         const formData = new FormData();
         if (content) formData.append('content', content);
         if (mediaFile) formData.append('media', mediaFile);
@@ -393,7 +401,6 @@ export default function Home() {
       }
       setSubmittingComment((prev) => ({ ...prev, [mediaId]: true }));
       try {
-        console.log(`Modification du commentaire ${commentId} pour média ${mediaId}`);
         const formData = new FormData();
         if (content) formData.append('content', content);
         if (mediaFile) formData.append('media', mediaFile);
@@ -599,7 +606,10 @@ export default function Home() {
           setFeed((prev) => [
             {
               ...media,
-              owner: { ...owner, whatsappNumber: owner.whatsappNumber || '', whatsappMessage: owner.whatsappMessage || '', profilePicture: owner.profilePicture || '' },
+              owner: {
+                ...owner,
+                profilePicture: owner.profilePicture || '',
+              },
               likesCount: media.likes.length,
               dislikesCount: media.dislikes.length,
               isLiked: false,
@@ -607,6 +617,25 @@ export default function Home() {
             },
             ...prev,
           ]);
+        }
+      });
+
+      socket.on('profilePictureUpdate', ({ userId, profilePicture }) => {
+        setFeed((prev) =>
+          prev.map((media) =>
+            media.owner._id.toString() === userId
+              ? {
+                  ...media,
+                  owner: {
+                    ...media.owner,
+                    profilePicture: profilePicture || '',
+                  },
+                }
+              : media
+          )
+        );
+        if (userId === parseJwt(token)?.userId) {
+          setProfilePicture(profilePicture || '');
         }
       });
 
@@ -694,13 +723,18 @@ export default function Home() {
                             new Date(c.createdAt).getTime() === new Date(comment.createdAt).getTime())
                         )
                     ),
-                    { ...comment, author: { ...comment.author, profilePicture: comment.author.profilePicture || '' } },
+                    {
+                      ...comment,
+                      author: {
+                        ...comment.author,
+                        profilePicture: comment.author.profilePicture || '',
+                      },
+                    },
                   ],
                 }
               : media
           )
         );
-        console.log(`Commentaire reçu via WebSocket pour média ${mediaId}: ${comment.content || 'Média'}`);
       });
 
       socket.on('commentDeleted', ({ mediaId, commentId }) => {
@@ -726,6 +760,7 @@ export default function Home() {
         socket.off('followUpdate');
         socket.off('unfollowUpdate');
         socket.off('newMedia');
+        socket.off('profilePictureUpdate');
         socket.off('mediaDeleted');
         socket.off('likeUpdate');
         socket.off('unlikeUpdate');
@@ -759,6 +794,7 @@ export default function Home() {
     setIsVerified(false);
     setFeed([]);
     setFollows([]);
+    setProfilePicture('');
     setMessage('Déconnecté');
     socket.disconnect();
     navigate('/profile');
@@ -812,6 +848,10 @@ export default function Home() {
                         src={`${API_URL}/uploads/${media.filename}`}
                         alt={media.originalname}
                         className="tiktok-media-content"
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                          setMessage(`Erreur de chargement de l'image ${media.originalname}`);
+                        }}
                       />
                     </Link>
                   ) : (
@@ -845,13 +885,20 @@ export default function Home() {
                     <p className="text-white small d-flex align-items-center">
                       {media.owner?.profilePicture ? (
                         <img
-                          src={`${API_URL}/uploads/profiles/${media.owner.profilePicture}`}
+                          src={media.owner.profilePicture}
                           alt={`Photo de profil de ${media.owner?.username || media.owner?.email}`}
                           className="rounded-circle me-2"
                           style={{ width: '30px', height: '30px', objectFit: 'cover' }}
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.nextSibling.style.display = 'inline';
+                          }}
                         />
                       ) : (
-                        <FaUser className="me-2" style={{ fontSize: '30px' }} />
+                        <FaUser
+                          className="me-2"
+                          style={{ fontSize: '30px' }}
+                        />
                       )}
                       Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
                       {media.owner && media.owner._id.toString() !== parseJwt(token)?.userId && (
@@ -914,6 +961,77 @@ export default function Home() {
                         <FaThumbsDown className="me-1" /> {media.dislikesCount} Dislike{media.dislikesCount !== 1 ? 's' : ''}
                       </span>
                     </p>
+                    <div className="action-buttons">
+                      <button
+                        className={`btn btn-sm ${media.isLiked ? 'btn-primary' : 'btn-outline-primary'} me-2`}
+                        onClick={() => (media.isLiked ? unlikeMedia(media._id) : likeMedia(media._id))}
+                        disabled={actionLoading[`like-${media._id}`] || actionLoading[`unlike-${media._id}`]}
+                        aria-label={media.isLiked ? 'Retirer le like' : 'Aimer'}
+                      >
+                        {actionLoading[`like-${media._id}`] || actionLoading[`unlike-${media._id}`] ? (
+                          <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        ) : (
+                          <FaThumbsUp />
+                        )}
+                        {media.isLiked ? ' Retirer' : ' Aimer'}
+                      </button>
+                      <button
+                        className={`btn btn-sm ${media.isDisliked ? 'btn-danger' : 'btn-outline-danger'} me-2`}
+                        onClick={() => (media.isDisliked ? undislikeMedia(media._id) : dislikeMedia(media._id))}
+                        disabled={actionLoading[`dislike-${media._id}`] || actionLoading[`undislike-${media._id}`]}
+                        aria-label={media.isDisliked ? 'Retirer le dislike' : 'Ne pas aimer'}
+                      >
+                        {actionLoading[`dislike-${media._id}`] || actionLoading[`undislike-${media._id}`] ? (
+                          <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        ) : (
+                          <FaThumbsDown />
+                        )}
+                        {media.isDisliked ? ' Retirer' : ' Ne pas aimer'}
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-light me-2"
+                        onClick={() => shareMedia(media._id, media.originalname)}
+                        aria-label="Partager"
+                      >
+                        <FaShare />
+                      </button>
+                      {showShareMenu === media._id && (
+                        <div className="share-menu">
+                          <button
+                            className="btn btn-sm btn-outline-light mb-1"
+                            onClick={() => copyToClipboard(`${window.location.origin}/media/${media._id}`)}
+                          >
+                            Copier le lien
+                          </button>
+                          {media.owner?.whatsappNumber && (
+                            <a
+                              href={`https://wa.me/${media.owner.whatsappNumber}?text=${encodeURIComponent(
+                                `${media.owner.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'} ${window.location.origin}/media/${media._id}`
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-sm btn-success"
+                            >
+                              <FaWhatsapp className="me-1" /> WhatsApp
+                            </a>
+                          )}
+                        </div>
+                      )}
+                      {media.owner?._id.toString() === parseJwt(token)?.userId && (
+                        <button
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => deleteMedia(media._id)}
+                          disabled={actionLoading[`delete-${media._id}`]}
+                          aria-label="Supprimer le média"
+                        >
+                          {actionLoading[`delete-${media._id}`] ? (
+                            <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                          ) : (
+                            <FaTrash />
+                          )}
+                        </button>
+                      )}
+                    </div>
                     <div className="comments-section">
                       <h6 className="text-white small">Commentaires ({media.comments?.length || 0}) :</h6>
                       <div className="comments-list">
@@ -929,6 +1047,10 @@ export default function Home() {
                                         src={`${API_URL}/uploads/${comment.media}`}
                                         alt="Comment media"
                                         className="comment-media-content"
+                                        onError={(e) => {
+                                          e.target.style.display = 'none';
+                                          setMessage(`Erreur de chargement du média du commentaire`);
+                                        }}
                                       />
                                     ) : (
                                       <video src={`${API_URL}/uploads/${comment.media}`} className="comment-media-content" controls />
@@ -1032,6 +1154,7 @@ export default function Home() {
                             <button
                               className="btn btn-sm btn-outline-danger"
                               onClick={() => setSelectedMedia((prev) => ({ ...prev, [media._id]: null }))}
+                              aria-label="Annuler la sélection du média"
                             >
                               Annuler
                             </button>
@@ -1039,111 +1162,6 @@ export default function Home() {
                         )}
                       </div>
                     </div>
-                  </div>
-                  <div className="tiktok-actions">
-                    {media.owner?.username === username && (
-                      <button
-                        className="btn btn-danger btn-sm rounded-circle mb-2 action-button"
-                        onClick={() => deleteMedia(media._id)}
-                        disabled={!isVerified || actionLoading[`delete-${media._id}`]}
-                        aria-label="Supprimer le média"
-                      >
-                        <FaTrash />
-                      </button>
-                    )}
-                    {media.owner && media.owner._id !== parseJwt(token)?.userId && (
-                      <>
-                        {media.isLiked ? (
-                          <button
-                            className="btn btn-danger btn-sm rounded-circle mb-2 action-button"
-                            onClick={() => unlikeMedia(media._id)}
-                            disabled={!isVerified || actionLoading[`unlike-${media._id}`]}
-                            aria-label="Retirer le like"
-                          >
-                            <FaThumbsUp />
-                          </button>
-                        ) : (
-                          <button
-                            className="btn btn-outline-danger btn-sm rounded-circle mb-2 action-button"
-                            onClick={() => likeMedia(media._id)}
-                            disabled={!isVerified || actionLoading[`like-${media._id}`]}
-                            aria-label="Aimer le média"
-                          >
-                            <FaThumbsUp />
-                          </button>
-                        )}
-                        {media.isDisliked ? (
-                          <button
-                            className="btn btn-warning btn-sm rounded-circle mb-2 action-button"
-                            onClick={() => undislikeMedia(media._id)}
-                            disabled={!isVerified || actionLoading[`undislike-${media._id}`]}
-                            aria-label="Retirer le dislike"
-                          >
-                            <FaThumbsDown />
-                          </button>
-                        ) : (
-                          <button
-                            className="btn btn-outline-warning btn-sm rounded-circle mb-2 action-button"
-                            onClick={() => dislikeMedia(media._id)}
-                            disabled={!isVerified || actionLoading[`dislike-${media._id}`]}
-                            aria-label="Marquer comme non apprécié"
-                          >
-                            <FaThumbsDown />
-                          </button>
-                        )}
-                        <div className="share-button-container position-relative">
-                          <button
-                            className="btn btn-outline-primary btn-sm rounded-circle mb-2 action-button"
-                            onClick={() => shareMedia(media._id, media.originalname)}
-                            disabled={!isVerified}
-                            aria-label="Partager le média"
-                          >
-                            <FaShare />
-                          </button>
-                          {showShareMenu === media._id && (
-                            <div className="share-menu position-absolute">
-                              <button
-                                className="btn btn-sm btn-outline-success w-100 mb-1"
-                                onClick={() => {
-                                  const shareUrl = `${window.location.origin}/media/${media._id}`;
-                                  const message = `${media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'} ${shareUrl}`;
-                                  window.open(
-                                    `https://wa.me/?text=${encodeURIComponent(message)}`,
-                                    '_blank',
-                                    'noopener,noreferrer'
-                                  );
-                                  setShowShareMenu(null);
-                                }}
-                              >
-                                <FaWhatsapp /> WhatsApp
-                              </button>
-                              <button
-                                className="btn btn-sm btn-outline-primary w-100 mb-1"
-                                onClick={() => {
-                                  const shareUrl = `${window.location.origin}/media/${media._id}`;
-                                  window.open(
-                                    `mailto:?subject=${encodeURIComponent(media.originalname)}&body=${encodeURIComponent(
-                                      `${media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'} ${shareUrl}`
-                                    )}`,
-                                    '_blank',
-                                    'noopener,noreferrer'
-                                  );
-                                  setShowShareMenu(null);
-                                }}
-                              >
-                                Email
-                              </button>
-                              <button
-                                className="btn btn-sm btn-outline-secondary w-100"
-                                onClick={() => copyToClipboard(`${window.location.origin}/media/${media._id}`)}
-                              >
-                                Copier le lien
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
                   </div>
                 </div>
               </div>
