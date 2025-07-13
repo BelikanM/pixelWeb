@@ -1,0 +1,35 @@
+/* sections/styles.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.qr-card {
+  max-width: 250px;
+  margin: 0 auto;
+  padding: 1rem;
+  background-color: #fff;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.qr-image {
+  width: 150px;
+  height: 150px;
+  object-fit: contain;
+  border: 2px solid #e5e7eb;
+  border-radius: 0.25rem;
+  margin: 0 auto;
+}
+
+/* Media queries pour la responsivité */
+@media (max-width: 576px) {
+  .qr-card {
+    max-width: 200px;
+    padding: 0.75rem;
+  }
+  .qr-image {
+    width: 100px;
+    height: 100px;
+  }
+}

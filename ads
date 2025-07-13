@@ -9,12 +9,10 @@ const bcryptjs = require("bcryptjs");
 const z = require("zod");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
-const multer = require("multer"); // Ajout de multer
-const path = require("path"); // Pour gérer les chemins de fichiers
 const app = express();
 
 // Configuration
-const PORT = 5050;
+const PORT = process.env.PORT || 5050;
 const {
   MONGODB_URI,
   JWT_SECRET,
@@ -22,47 +20,24 @@ const {
   EMAIL_PASS,
 } = process.env;
 
-// Configuration de multer pour les fichiers
-const storage = multer.diskStorage({
-  destination: "./uploads/",
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-const upload = multer({
-  storage,
-  fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png|pdf/;
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = filetypes.test(file.mimetype);
-    if (extname && mimetype) {
-      return cb(null, true);
-    } else {
-      cb(new Error("Seuls les fichiers JPEG, PNG ou PDF sont autorisés"));
-    }
-  },
-  limits: { fileSize: 5 * 1024 * 1024 }, // Limite de 5 Mo
-});
-
 // Middleware
-app.use(helmet());
+app.use(helmet()); // En-têtes de sécurité
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json({ limit: "10mb" }));
-app.use(express.static("uploads")); // Servir les fichiers uploadés
 
-// Limitation de taux
+// Limitation de taux pour les endpoints sensibles
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requêtes maximum par fenêtre
   message: "Trop de requêtes, veuillez réessayer plus tard.",
 });
 
-// Schémas de validation
+// Schémas de validation des entrées
 const RegisterSchema = z.object({
   email: z.string().email("Email invalide"),
   password: z.string().min(8, "Mot de passe trop court"),
   phoneNumber: z.string().regex(/^\+?[1-9]\d{1,14}$/, "Numéro de téléphone invalide"),
-  // airtelQRCode n'est plus validé ici car c'est un fichier
+  airtelQRCode: z.string().min(1, "Code QR Airtel requis"),
 });
 
 const LoginSchema = z.object({
@@ -83,13 +58,10 @@ const InteractSchema = z.object({
 // Middleware de gestion des erreurs
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  if (err instanceof multer.MulterError) {
-    return res.status(400).json({ error: "Erreur lors du téléversement du fichier" });
-  }
   res.status(500).json({ error: "Erreur interne du serveur" });
 });
 
-// Connexion à MongoDB
+// Connexion à la base de données
 mongoose
   .connect(MONGODB_URI, { autoIndex: true })
   .then(() => console.log("✅ MongoDB connecté"))
@@ -101,7 +73,7 @@ const UserSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: { type: String, enum: ["admin", "user"], default: "user" },
   phoneNumber: { type: String, required: true },
-  airtelQRCode: { type: String, required: true }, // Stocke le chemin du fichier
+  airtelQRCode: { type: String, required: true },
   earnings: { type: Number, default: 0 },
   warnings: { type: Number, default: 0 },
 });
@@ -149,10 +121,9 @@ const verifyToken = (req, res, next) => {
 };
 
 // Routes
-app.post("/api/register", authLimiter, upload.single("airtelQRCode"), async (req, res) => {
+app.post("/api/register", authLimiter, async (req, res) => {
   try {
-    const { email, password, phoneNumber } = RegisterSchema.parse(req.body);
-    if (!req.file) return res.status(400).json({ error: "Fichier QR Airtel requis" });
+    const { email, password, phoneNumber, airtelQRCode } = RegisterSchema.parse(req.body);
     const existingUser = await User.findOne({ email });
     if (existingUser) return res.status(400).json({ error: "Email déjà utilisé" });
 
@@ -161,9 +132,10 @@ app.post("/api/register", authLimiter, upload.single("airtelQRCode"), async (req
       email,
       password: hashedPassword,
       phoneNumber,
-      airtelQRCode: req.file.path, // Stocke le chemin du fichier
+      airtelQRCode,
     });
 
+    // Envoi d'un email de bienvenue
     await transporter.sendMail({
       from: EMAIL_USER,
       to: email,
@@ -180,7 +152,6 @@ app.post("/api/register", authLimiter, upload.single("airtelQRCode"), async (req
   }
 });
 
-// Les autres routes restent inchangées...
 app.post("/api/login", authLimiter, async (req, res) => {
   try {
     const { email, password } = LoginSchema.parse(req.body);
@@ -240,6 +211,7 @@ app.post("/api/interact", verifyToken, async (req, res) => {
       return res.status(400).json({ error: "Budget épuisé" });
     }
 
+    // Vérification des interactions en double
     const existingInteraction = await Interaction.findOne({
       userId: req.user.id,
       adId,
@@ -249,13 +221,16 @@ app.post("/api/interact", verifyToken, async (req, res) => {
       return res.status(400).json({ error: "Interaction déjà enregistrée" });
     }
 
+    // Mise à jour de l'annonce
     ad.remainingBudget -= reward;
     ad.interactions += 1;
     if (type === "view") ad.views += 1;
     await ad.save();
 
+    // Enregistrement de l'interaction
     await Interaction.create({ userId: req.user.id, adId, type, reward });
 
+    // Mise à jour des gains de l'utilisateur
     await User.findByIdAndUpdate(req.user.id, { $inc: { earnings: reward } });
 
     res.json({ message: "Interaction enregistrée", reward });
