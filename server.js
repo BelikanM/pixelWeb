@@ -1,4 +1,4 @@
-// Importation des dépendances
+// server.js
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -67,7 +67,7 @@ const userSchema = new mongoose.Schema({
   verificationCodeExpires: { type: Date },
   pushSubscription: { type: Object },
   profilePicture: { type: String, default: '' },
-  points: { type: Number, default: 100 }, // Points initiaux à l'inscription
+  points: { type: Number, default: 100 },
 });
 const User = mongoose.model('User', userSchema);
 
@@ -117,7 +117,7 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Configuration Multer pour les médias
+// Configuration Multer pour les médias locaux
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadPath = path.join(__dirname, 'Uploads');
@@ -637,35 +637,24 @@ app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (
   }
 });
 
-// Route pour uploader un média
-app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
-  const { youtubeUrl, originalname, autoplay, muted, subtitles } = req.body;
+// Route pour uploader un fichier local
+app.post('/upload/local', verifyToken, upload.single('media'), async (req, res) => {
+  const { originalname } = req.body;
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    if (!req.file && !youtubeUrl) {
-      return res.status(400).json({ message: 'Aucun fichier ou URL YouTube fourni' });
+    if (!req.file) {
+      return res.status(400).json({ message: 'Aucun fichier fourni' });
     }
     if (!originalname || !originalname.trim()) {
       return res.status(400).json({ message: 'Le nom du média est requis' });
     }
 
-    if (youtubeUrl) {
-      const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=|embed\/|v\/|.+\?v=)?([^&=%\?]{11})/;
-      if (!youtubeRegex.test(youtubeUrl)) {
-        return res.status(400).json({ message: 'URL YouTube invalide' });
-      }
-    }
-
     const media = await Media.create({
-      filename: req.file ? req.file.filename : null,
-      youtubeUrl: youtubeUrl || null,
-      youtubeOptions: youtubeUrl ? {
-        autoplay: autoplay === 'true',
-        muted: muted === 'true',
-        subtitles: subtitles === 'true'
-      } : null,
+      filename: req.file.filename,
+      youtubeUrl: null,
+      youtubeOptions: null,
       originalname: originalname.trim(),
       owner: req.user.userId,
       likes: [],
@@ -679,7 +668,7 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
       .lean();
 
     res.status(201).json({
-      message: 'Fichier ou URL YouTube uploadé',
+      message: 'Fichier local uploadé',
       media: {
         ...populatedMedia,
         owner: {
@@ -700,7 +689,73 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
       owner: user
     });
   } catch (error) {
-    console.error('Erreur /upload:', error);
+    console.error('Erreur /upload/local:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// Route pour uploader une URL YouTube
+app.post('/upload/youtube', verifyToken, async (req, res) => {
+  const { youtubeUrl, originalname, autoplay, muted, subtitles } = req.body;
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+
+    if (!youtubeUrl) {
+      return res.status(400).json({ message: 'URL YouTube requise' });
+    }
+    if (!originalname || !originalname.trim()) {
+      return res.status(400).json({ message: 'Le nom du média est requis' });
+    }
+
+    const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=|embed\/|v\/|.+\?v=)?([^&=%\?]{11})/;
+    if (!youtubeRegex.test(youtubeUrl)) {
+      return res.status(400).json({ message: 'URL YouTube invalide' });
+    }
+
+    const media = await Media.create({
+      filename: null,
+      youtubeUrl,
+      youtubeOptions: {
+        autoplay: autoplay === 'true',
+        muted: muted === 'true',
+        subtitles: subtitles === 'true'
+      },
+      originalname: originalname.trim(),
+      owner: req.user.userId,
+      likes: [],
+      dislikes: [],
+      views: [],
+      comments: [],
+    });
+
+    const populatedMedia = await Media.findById(media._id)
+      .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
+      .lean();
+
+    res.status(201).json({
+      message: 'URL YouTube uploadée',
+      media: {
+        ...populatedMedia,
+        owner: {
+          ...populatedMedia.owner,
+          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
+        }
+      }
+    });
+
+    io.to(user._id.toString()).emit('newMedia', {
+      media: {
+        ...populatedMedia,
+        owner: {
+          ...populatedMedia.owner,
+          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
+        }
+      },
+      owner: user
+    });
+  } catch (error) {
+    console.error('Erreur /upload/youtube:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
@@ -731,6 +786,7 @@ app.get('/feed', verifyToken, async (req, res) => {
       },
       comments: media.comments.map(comment => ({
         ...comment,
+        media: comment.media ? `${req.protocol}://${req.get('host')}/uploads/${comment.media}` : null,
         author: {
           ...comment.author,
           profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''

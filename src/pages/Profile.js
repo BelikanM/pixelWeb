@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera, FaChartPie, FaThumbsUp, FaThumbsDown, FaComment } from 'react-icons/fa';
+import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera, FaChartPie, FaThumbsUp, FaThumbsDown, FaComment, FaVideo, FaFileUpload } from 'react-icons/fa';
 import io from 'socket.io-client';
 import './Profile.css';
 
@@ -43,7 +43,8 @@ export default function Profile() {
   const [points, setPoints] = useState(0);
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [youtubeOptions, setYoutubeOptions] = useState({ autoplay: false, muted: false, subtitles: false });
-  const [mediaName, setMediaName] = useState(''); // Nouveau champ pour le nom du média
+  const [mediaName, setMediaName] = useState(''); // Nom pour fichier local
+  const [youtubeMediaName, setYoutubeMediaName] = useState(''); // Nom pour URL YouTube
   const [commentText, setCommentText] = useState({}); // Commentaires par média
 
   // Charger profil utilisateur
@@ -393,7 +394,7 @@ export default function Profile() {
         setEditUsername(data.user.username);
         setWhatsappNumber(data.user.whatsappNumber || '');
         setIsVerified(data.user.isVerified);
-        setProfilePicture(data.user.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
+        setProfilePicture(data.user.profilePicture || '');
         setSelectedProfilePicture(null);
         setPoints(data.user.points || 0);
         loadProfile();
@@ -414,41 +415,28 @@ export default function Profile() {
     }
   }, [token, editUsername, whatsappNumber, selectedProfilePicture, isVerified, loadProfile, loadDiskUsage]);
 
-  // Upload média ou URL YouTube
-  const handleUpload = useCallback(
+  // Upload fichier local
+  const handleLocalUpload = useCallback(
     async (e) => {
       e.preventDefault();
       if (!isVerified) {
         setMessage('Veuillez vérifier votre email avant d’uploader des fichiers');
         return;
       }
-      if (!file && !youtubeUrl) {
-        setMessage('Veuillez choisir un fichier ou entrer une URL YouTube');
+      if (!file) {
+        setMessage('Veuillez choisir un fichier');
         return;
       }
       if (!mediaName.trim()) {
         setMessage('Le nom du média est requis');
         return;
       }
-      if (youtubeUrl) {
-        const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
-        if (!youtubeRegex.test(youtubeUrl)) {
-          setMessage('URL YouTube invalide');
-          return;
-        }
-      }
       setLoading(true);
       try {
         const formData = new FormData();
-        if (file) {
-          formData.append('media', file);
-        }
+        formData.append('media', file);
         formData.append('originalname', mediaName);
-        if (youtubeUrl) {
-          formData.append('youtubeUrl', youtubeUrl);
-          formData.append('youtubeOptions', JSON.stringify(youtubeOptions));
-        }
-        const res = await fetch(`${API_URL}/upload`, {
+        const res = await fetch(`${API_URL}/upload/local`, {
           method: 'POST',
           headers: { Authorization: token },
           body: formData,
@@ -458,21 +446,74 @@ export default function Profile() {
           setMessage(data.message);
           setFile(null);
           setMediaName('');
+          loadFeed();
+          loadMyMedias();
+          loadDiskUsage();
+        } else {
+          setMessage(data.message || 'Erreur upload fichier local');
+        }
+      } catch {
+        setMessage('Erreur réseau lors de l’upload du fichier');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token, file, mediaName, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
+  );
+
+  // Upload URL YouTube
+  const handleYoutubeUpload = useCallback(
+    async (e) => {
+      e.preventDefault();
+      if (!isVerified) {
+        setMessage('Veuillez vérifier votre email avant d’uploader une URL YouTube');
+        return;
+      }
+      if (!youtubeUrl) {
+        setMessage('Veuillez entrer une URL YouTube');
+        return;
+      }
+      if (!youtubeMediaName.trim()) {
+        setMessage('Le nom du média est requis');
+        return;
+      }
+      const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+      if (!youtubeRegex.test(youtubeUrl)) {
+        setMessage('URL YouTube invalide');
+        return;
+      }
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_URL}/upload/youtube`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: token },
+          body: JSON.stringify({
+            youtubeUrl,
+            originalname: youtubeMediaName,
+            autoplay: youtubeOptions.autoplay,
+            muted: youtubeOptions.muted,
+            subtitles: youtubeOptions.subtitles,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setMessage(data.message);
           setYoutubeUrl('');
+          setYoutubeMediaName('');
           setYoutubeOptions({ autoplay: false, muted: false, subtitles: false });
           loadFeed();
           loadMyMedias();
           loadDiskUsage();
         } else {
-          setMessage(data.message || 'Erreur upload');
+          setMessage(data.message || 'Erreur upload URL YouTube');
         }
       } catch {
-        setMessage('Erreur réseau lors de l’upload');
+        setMessage('Erreur réseau lors de l’upload de l’URL YouTube');
       } finally {
         setLoading(false);
       }
     },
-    [token, file, youtubeUrl, youtubeOptions, mediaName, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
+    [token, youtubeUrl, youtubeMediaName, youtubeOptions, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
   );
 
   // Liker un média
@@ -483,7 +524,7 @@ export default function Profile() {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/media/${id}/like`, {
+      const res = await fetch(`${API_URL}/like/${id}`, {
         method: 'POST',
         headers: { Authorization: token },
       });
@@ -510,7 +551,7 @@ export default function Profile() {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/media/${id}/dislike`, {
+      const res = await fetch(`${API_URL}/dislike/${id}`, {
         method: 'POST',
         headers: { Authorization: token },
       });
@@ -542,7 +583,7 @@ export default function Profile() {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/media/${mediaId}/comment`, {
+      const res = await fetch(`${API_URL}/comment/${mediaId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: token },
         body: JSON.stringify({ content }),
@@ -617,7 +658,7 @@ export default function Profile() {
           setEditUsername(data.user?.username || '');
           setWhatsappNumber(data.user?.whatsappNumber || '');
           setIsVerified(data.user?.isVerified || false);
-          setProfilePicture(data.user?.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
+          setProfilePicture(data.user?.profilePicture || '');
           setPoints(data.user.points || 0);
           setMessage('Connecté avec succès !');
         } else {
@@ -688,30 +729,92 @@ export default function Profile() {
       socket.emit('join', userId);
     });
 
-    socket.on('updateMedia', (updatedMedia) => {
+    socket.on('newMedia', ({ media }) => {
+      setFeed((prev) => [media, ...prev]);
+      if (media.owner._id === userId) {
+        setMyMedias((prev) => [media, ...prev]);
+      }
+    });
+
+    socket.on('mediaDeleted', ({ mediaId }) => {
+      setFeed((prev) => prev.filter((media) => media._id !== mediaId));
+      setMyMedias((prev) => prev.filter((media) => media._id !== mediaId));
+    });
+
+    socket.on('likeUpdate', ({ mediaId, likesCount, dislikesCount, userId: likerId, points }) => {
       setFeed((prev) =>
         prev.map((media) =>
-          media._id === updatedMedia._id
-            ? { ...media, likes: updatedMedia.likes, dislikes: updatedMedia.dislikes, comments: updatedMedia.comments }
+          media._id === mediaId
+            ? {
+                ...media,
+                likesCount,
+                dislikesCount,
+                isLiked: likerId === userId ? true : media.isLiked,
+                isDisliked: likerId === userId ? false : media.isDisliked,
+              }
             : media
         )
       );
       setMyMedias((prev) =>
         prev.map((media) =>
-          media._id === updatedMedia._id
-            ? { ...media, likes: updatedMedia.likes, dislikes: updatedMedia.dislikes, comments: updatedMedia.comments }
+          media._id === mediaId
+            ? {
+                ...media,
+                likesCount,
+                dislikesCount,
+                isLiked: likerId === userId ? true : media.isLiked,
+                isDisliked: likerId === userId ? false : media.isDisliked,
+              }
+            : media
+        )
+      );
+      if (likerId === userId) setPoints(points);
+    });
+
+    socket.on('dislikeUpdate', ({ mediaId, likesCount, dislikesCount, userId: dislikerId }) => {
+      setFeed((prev) =>
+        prev.map((media) =>
+          media._id === mediaId
+            ? {
+                ...media,
+                likesCount,
+                dislikesCount,
+                isLiked: dislikerId === userId ? false : media.isLiked,
+                isDisliked: dislikerId === userId ? true : media.isDisliked,
+              }
+            : media
+        )
+      );
+      setMyMedias((prev) =>
+        prev.map((media) =>
+          media._id === mediaId
+            ? {
+                ...media,
+                likesCount,
+                dislikesCount,
+                isLiked: dislikerId === userId ? false : media.isLiked,
+                isDisliked: dislikerId === userId ? true : media.isDisliked,
+              }
             : media
         )
       );
     });
 
-    socket.on('updatePoints', (newPoints) => {
-      setPoints(newPoints);
-    });
-
-    socket.on('updateFollows', (newFollows) => {
-      setFollows(newFollows);
-      loadFeed();
+    socket.on('commentUpdate', ({ mediaId, comment }) => {
+      setFeed((prev) =>
+        prev.map((media) =>
+          media._id === mediaId
+            ? { ...media, comments: [...media.comments, comment] }
+            : media
+        )
+      );
+      setMyMedias((prev) =>
+        prev.map((media) =>
+          media._id === mediaId
+            ? { ...media, comments: [...media.comments, comment] }
+            : media
+        )
+      );
     });
 
     socket.on('profilePictureUpdate', ({ userId: updatedUserId, profilePicture }) => {
@@ -734,12 +837,14 @@ export default function Profile() {
 
     return () => {
       socket.off('connect');
-      socket.off('updateMedia');
-      socket.off('updatePoints');
-      socket.off('updateFollows');
+      socket.off('newMedia');
+      socket.off('mediaDeleted');
+      socket.off('likeUpdate');
+      socket.off('dislikeUpdate');
+      socket.off('commentUpdate');
       socket.off('profilePictureUpdate');
     };
-  }, [userId, loadFeed]);
+  }, [userId]);
 
   // Chargement initial
   useEffect(() => {
@@ -772,171 +877,115 @@ export default function Profile() {
   }, [token, loadProfile, loadFollows, loadFeed, loadMyMedias, loadUsers, loadDiskUsage, isVerified]);
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 900 }}>
-      <h1 className="mb-4 text-center text-primary">Pixels Media</h1>
+    <div className="container mt-4">
+      {loading && <div className="alert alert-info">Chargement...</div>}
+      {message && (
+        <div className={`alert ${message.includes('Erreur') ? 'alert-danger' : 'alert-success'}`}>
+          {message}
+        </div>
+      )}
 
       {!token ? (
-        <div className="card p-4 bg-light text-dark rounded shadow-sm">
-          <h2 className="text-center">{isLogin ? 'Connexion' : 'Inscription'}</h2>
-          {message && (
-            <div className={`alert ${message.includes('Erreur') ? 'alert-danger' : 'alert-success'} alert-dismissible fade show`} role="alert">
-              {message}
-              <button type="button" className="btn-close" onClick={() => setMessage('')} aria-label="Fermer"></button>
-            </div>
-          )}
+        <div className="card p-4">
+          <h2>{isLogin ? 'Connexion' : 'Inscription'}</h2>
           <form onSubmit={handleSubmit}>
-            <div className="mb-3">
-              <label htmlFor="email" className="form-label">Email</label>
-              <input
-                type="email"
-                id="email"
-                placeholder="Email"
-                className="form-control"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                aria-label="Adresse e-mail"
-              />
-            </div>
-            <div className="mb-3">
-              <label htmlFor="password" className="form-label">Mot de passe</label>
-              <input
-                type="password"
-                id="password"
-                placeholder="Mot de passe"
-                className="form-control"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                aria-label="Mot de passe"
-              />
-            </div>
             {!isLogin && (
               <>
                 <div className="mb-3">
-                  <label htmlFor="username" className="form-label">Nom d’utilisateur (optionnel)</label>
+                  <label className="form-label">Nom d’utilisateur</label>
                   <input
                     type="text"
-                    id="username"
-                    placeholder="Nom d’utilisateur"
                     className="form-control"
                     value={editUsername}
                     onChange={(e) => setEditUsername(e.target.value)}
-                    aria-label="Nom d’utilisateur"
+                    required={!isLogin}
                   />
                 </div>
                 <div className="mb-3">
-                  <label htmlFor="whatsappNumber" className="form-label">Numéro WhatsApp (optionnel, ex: +1234567890)</label>
+                  <label className="form-label">Numéro WhatsApp (optionnel, format: +1234567890)</label>
                   <input
                     type="text"
-                    id="whatsappNumber"
-                    placeholder="Numéro WhatsApp"
                     className="form-control"
                     value={whatsappNumber}
                     onChange={(e) => setWhatsappNumber(e.target.value)}
-                    aria-label="Numéro WhatsApp"
                   />
                 </div>
               </>
             )}
+            <div className="mb-3">
+              <label className="form-label">Email</label>
+              <input
+                type="email"
+                className="form-control"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label">Mot de passe</label>
+              <input
+                type="password"
+                className="form-control"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            <button type="submit" className="btn btn-primary">
+              {isLogin ? 'Se connecter' : 'S’inscrire'}
+            </button>
             <button
-              className="btn btn-primary w-100 mb-3"
-              type="submit"
-              disabled={loading}
-              aria-label={isLogin ? 'Se connecter' : "S'inscrire"}
+              type="button"
+              className="btn btn-link"
+              onClick={() => setIsLogin(!isLogin)}
             >
-              {loading ? (
-                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-              ) : isLogin ? 'Se connecter' : "S'inscrire"}
+              {isLogin ? 'Créer un compte' : 'J’ai déjà un compte'}
             </button>
           </form>
-          <button
-            className="btn btn-link w-100"
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setMessage('');
+        </div>
+      ) : !isVerified ? (
+        <div className="card p-4">
+          <h2>Vérification de l’email</h2>
+          <p>Veuillez entrer le code de vérification reçu par email.</p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              verifyCode();
             }}
-            aria-label={isLogin ? 'Passer à l’inscription' : 'Passer à la connexion'}
           >
-            {isLogin ? "Pas encore de compte ? S'inscrire" : 'Déjà inscrit ? Se connecter'}
+            <div className="mb-3">
+              <label className="form-label">Code de vérification</label>
+              <input
+                type="text"
+                className="form-control"
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+                required
+              />
+            </div>
+            <button type="submit" className="btn btn-primary">
+              Vérifier
+            </button>
+            <button
+              type="button"
+              className="btn btn-link"
+              onClick={requestVerificationCode}
+            >
+              Renvoyer le code
+            </button>
+          </form>
+          <button className="btn btn-danger mt-3" onClick={handleLogout}>
+            <FaSignOutAlt /> Déconnexion
           </button>
         </div>
       ) : (
         <>
-          <div className="d-flex justify-content-between align-items-center mb-4">
-            <h3 className="text-dark d-flex align-items-center">
-              {profilePicture ? (
-                <img
-                  src={profilePicture}
-                  alt="Photo de profil"
-                  className="rounded-circle me-2"
-                  style={{ width: '40px', height: '40px', objectFit: 'cover' }}
-                />
-              ) : (
-                <FaUser className="me-2" />
-              )}
-              Bonjour, {username || email || 'Utilisateur'} (Points: {points} FCFA)
-            </h3>
-            <button
-              className="btn btn-outline-danger"
-              onClick={handleLogout}
-              disabled={loading}
-              aria-label="Se déconnecter"
-            >
-              <FaSignOutAlt className="me-1" /> Déconnexion
-            </button>
-          </div>
-
-          {message && (
-            <div className={`alert ${message.includes('Erreur') ? 'alert-danger' : 'alert-success'} alert-dismissible fade show`} role="alert">
-              {message}
-              <button type="button" className="btn-close" onClick={() => setMessage('')} aria-label="Fermer"></button>
-            </div>
-          )}
-
-          {!isVerified && (
-            <div className="card p-4 mb-4 bg-light text-dark rounded shadow-sm">
-              <h4>Vérification de l'email</h4>
-              <p>Veuillez entrer le code de vérification reçu par email.</p>
-              <div className="input-group mb-3">
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Code de vérification"
-                  value={verificationCode}
-                  onChange={(e) => setVerificationCode(e.target.value)}
-                  aria-label="Code de vérification"
-                />
-                <button
-                  className="btn btn-primary"
-                  onClick={verifyCode}
-                  disabled={loading}
-                  aria-label="Vérifier le code"
-                >
-                  {loading ? (
-                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                  ) : (
-                    'Vérifier'
-                  )}
-                </button>
-              </div>
-              <button
-                className="btn btn-link"
-                onClick={requestVerificationCode}
-                disabled={loading}
-                aria-label="Demander un nouveau code"
-              >
-                Demander un nouveau code
-              </button>
-            </div>
-          )}
-
           <ul className="nav nav-tabs mb-4">
             <li className="nav-item">
               <button
                 className={`nav-link ${activeTab === 'profile' ? 'active' : ''}`}
                 onClick={() => setActiveTab('profile')}
-                aria-label="Profil"
               >
                 Profil
               </button>
@@ -945,373 +994,265 @@ export default function Profile() {
               <button
                 className={`nav-link ${activeTab === 'upload' ? 'active' : ''}`}
                 onClick={() => setActiveTab('upload')}
-                disabled={!isVerified}
-                aria-label="Uploader"
               >
                 Uploader
               </button>
             </li>
             <li className="nav-item">
               <button
-                className={`nav-link ${activeTab === 'users' ? 'active' : ''}`}
-                onClick={() => setActiveTab('users')}
-                disabled={!isVerified}
-                aria-label="Utilisateurs"
-              >
-                Utilisateurs
-              </button>
-            </li>
-            <li className="nav-item">
-              <button
                 className={`nav-link ${activeTab === 'feed' ? 'active' : ''}`}
                 onClick={() => setActiveTab('feed')}
-                disabled={!isVerified}
-                aria-label="Fil"
               >
                 Fil
               </button>
             </li>
             <li className="nav-item">
               <button
-                className={`nav-link ${activeTab === 'my-medias' ? 'active' : ''}`}
-                onClick={() => setActiveTab('my-medias')}
-                disabled={!isVerified}
-                aria-label="Mes médias"
+                className={`nav-link ${activeTab === 'myMedias' ? 'active' : ''}`}
+                onClick={() => setActiveTab('myMedias')}
               >
                 Mes médias
               </button>
             </li>
             <li className="nav-item">
               <button
-                className={`nav-link ${activeTab === 'dashboard' ? 'active' : ''}`}
-                onClick={() => setActiveTab('dashboard')}
-                disabled={!isVerified}
-                aria-label="Tableau de bord"
+                className={`nav-link ${activeTab === 'users' ? 'active' : ''}`}
+                onClick={() => setActiveTab('users')}
               >
-                Tableau de bord
+                Utilisateurs
+              </button>
+            </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link ${activeTab === 'stats' ? 'active' : ''}`}
+                onClick={() => setActiveTab('stats')}
+              >
+                Statistiques
               </button>
             </li>
           </ul>
 
           {activeTab === 'profile' && (
-            <div className="card p-4 bg-light text-dark rounded shadow-sm">
-              <h4>Profil</h4>
-              <div className="mb-3 text-center">
+            <div className="card p-4">
+              <h2>Profil</h2>
+              <div className="mb-3">
+                <label className="form-label">Photo de profil</label>
                 {profilePicture ? (
                   <img
                     src={profilePicture}
                     alt="Photo de profil"
-                    className="rounded-circle mb-3"
+                    className="img-thumbnail mb-2"
                     style={{ width: '100px', height: '100px', objectFit: 'cover' }}
                   />
                 ) : (
-                  <FaUser size={100} className="text-muted mb-3" />
+                  <FaUser size={100} className="mb-2" />
                 )}
-                <div>
-                  <label htmlFor="profilePicture" className="btn btn-outline-primary">
-                    <FaCamera className="me-1" /> Changer la photo
-                    <input
-                      type="file"
-                      id="profilePicture"
-                      accept="image/jpeg,image/jpg,image/png"
-                      style={{ display: 'none' }}
-                      onChange={handleProfilePictureChange}
-                      aria-label="Changer la photo de profil"
-                    />
-                  </label>
-                </div>
+                <input
+                  type="file"
+                  className="form-control"
+                  accept="image/*"
+                  onChange={handleProfilePictureChange}
+                />
               </div>
               <div className="mb-3">
-                <label htmlFor="editUsername" className="form-label">Nom d’utilisateur</label>
+                <label className="form-label">Nom d’utilisateur</label>
                 <input
                   type="text"
-                  id="editUsername"
                   className="form-control"
                   value={editUsername}
                   onChange={(e) => setEditUsername(e.target.value)}
-                  disabled={!isVerified}
-                  aria-label="Nom d’utilisateur"
                 />
               </div>
               <div className="mb-3">
-                <label htmlFor="editWhatsappNumber" className="form-label">Numéro WhatsApp (optionnel)</label>
+                <label className="form-label">Email</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  value={email}
+                  disabled
+                />
+              </div>
+              <div className="mb-3">
+                <label className="form-label">Numéro WhatsApp (optionnel)</label>
                 <input
                   type="text"
-                  id="editWhatsappNumber"
                   className="form-control"
                   value={whatsappNumber}
                   onChange={(e) => setWhatsappNumber(e.target.value)}
-                  disabled={!isVerified}
-                  aria-label="Numéro WhatsApp"
                 />
               </div>
-              <button
-                className="btn btn-primary w-100"
-                onClick={updateProfile}
-                disabled={loading || !isVerified}
-                aria-label="Mettre à jour le profil"
-              >
-                {loading ? (
-                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                ) : (
-                  'Mettre à jour'
-                )}
+              <div className="mb-3">
+                <label className="form-label">Points</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={points}
+                  disabled
+                />
+              </div>
+              <button className="btn btn-primary" onClick={updateProfile}>
+                <FaSave /> Mettre à jour
+              </button>
+              <button className="btn btn-danger ms-2" onClick={handleLogout}>
+                <FaSignOutAlt /> Déconnexion
               </button>
             </div>
           )}
 
-          {activeTab === 'upload' && isVerified && (
-            <div className="card p-4 bg-light text-dark rounded shadow-sm">
-              <h4>Uploader un média ou une vidéo YouTube</h4>
-              <form onSubmit={handleUpload}>
+          {activeTab === 'upload' && (
+            <div className="card p-4">
+              <h2>Uploader un média</h2>
+              <h3>Uploader un fichier local</h3>
+              <form onSubmit={handleLocalUpload}>
                 <div className="mb-3">
-                  <label htmlFor="mediaName" className="form-label">Nom du média</label>
+                  <label className="form-label">Nom du média</label>
                   <input
                     type="text"
-                    id="mediaName"
                     className="form-control"
-                    placeholder="Entrez le nom du média"
                     value={mediaName}
                     onChange={(e) => setMediaName(e.target.value)}
                     required
-                    aria-label="Nom du média"
                   />
                 </div>
                 <div className="mb-3">
-                  <label htmlFor="file" className="form-label">Choisir un fichier (image/vidéo)</label>
+                  <label className="form-label">Fichier (image ou vidéo)</label>
                   <input
                     type="file"
-                    id="file"
                     className="form-control"
                     accept="image/*,video/*"
-                    onChange={(e) => {
-                      setFile(e.target.files[0]);
-                      setYoutubeUrl('');
-                    }}
-                    aria-label="Choisir un fichier"
+                    onChange={(e) => setFile(e.target.files[0])}
+                  />
+                </div>
+                <button type="submit" className="btn btn-primary">
+                  <FaFileUpload /> Uploader fichier
+                </button>
+              </form>
+              <hr />
+              <h3>Uploader une URL YouTube</h3>
+              <form onSubmit={handleYoutubeUpload}>
+                <div className="mb-3">
+                  <label className="form-label">Nom du média</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={youtubeMediaName}
+                    onChange={(e) => setYoutubeMediaName(e.target.value)}
+                    required
                   />
                 </div>
                 <div className="mb-3">
-                  <label htmlFor="youtubeUrl" className="form-label">Ou coller une URL YouTube</label>
+                  <label className="form-label">URL YouTube</label>
                   <input
                     type="text"
-                    id="youtubeUrl"
                     className="form-control"
-                    placeholder="Ex: https://www.youtube.com/watch?v=..."
                     value={youtubeUrl}
-                    onChange={(e) => {
-                      setYoutubeUrl(e.target.value);
-                      setFile(null);
-                    }}
-                    aria-label="URL YouTube"
+                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    required
                   />
                 </div>
-                {youtubeUrl && (
-                  <div className="mb-3">
-                    <h5>Options de lecture YouTube</h5>
-                    <div className="form-check">
-                      <input
-                        type="checkbox"
-                        id="autoplay"
-                        className="form-check-input"
-                        checked={youtubeOptions.autoplay}
-                        onChange={(e) => setYoutubeOptions({ ...youtubeOptions, autoplay: e.target.checked })}
-                        aria-label="Lecture automatique"
-                      />
-                      <label htmlFor="autoplay" className="form-check-label">Lecture automatique</label>
-                    </div>
-                    <div className="form-check">
-                      <input
-                        type="checkbox"
-                        id="muted"
-                        className="form-check-input"
-                        checked={youtubeOptions.muted}
-                        onChange={(e) => setYoutubeOptions({ ...youtubeOptions, muted: e.target.checked })}
-                        aria-label="Son désactivé"
-                      />
-                      <label htmlFor="muted" className="form-check-label">Son désactivé</label>
-                    </div>
-                    <div className="form-check">
-                      <input
-                        type="checkbox"
-                        id="subtitles"
-                        className="form-check-input"
-                        checked={youtubeOptions.subtitles}
-                        onChange={(e) => setYoutubeOptions({ ...youtubeOptions, subtitles: e.target.checked })}
-                        aria-label="Sous-titres"
-                      />
-                      <label htmlFor="subtitles" className="form-check-label">Sous-titres</label>
-                    </div>
+                <div className="mb-3">
+                  <label className="form-label">Options YouTube</label>
+                  <div className="form-check">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      checked={youtubeOptions.autoplay}
+                      onChange={() => setYoutubeOptions((prev) => ({ ...prev, autoplay: !prev.autoplay }))}
+                    />
+                    <label className="form-check-label">Lecture automatique</label>
                   </div>
-                )}
-                <button
-                  className="btn btn-primary w-100"
-                  type="submit"
-                  disabled={loading}
-                  aria-label="Uploader le fichier ou l’URL YouTube"
-                >
-                  {loading ? (
-                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                  ) : (
-                    <><FaUpload className="me-1" /> Uploader</>
-                  )}
+                  <div className="form-check">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      checked={youtubeOptions.muted}
+                      onChange={() => setYoutubeOptions((prev) => ({ ...prev, muted: !prev.muted }))}
+                    />
+                    <label className="form-check-label">Muet</label>
+                  </div>
+                  <div className="form-check">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      checked={youtubeOptions.subtitles}
+                      onChange={() => setYoutubeOptions((prev) => ({ ...prev, subtitles: !prev.subtitles }))}
+                    />
+                    <label className="form-check-label">Sous-titres</label>
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-primary">
+                  <FaVideo /> Uploader YouTube
                 </button>
               </form>
             </div>
           )}
 
-          {activeTab === 'users' && isVerified && (
-            <div className="card p-4 bg-light text-dark rounded shadow-sm">
-              <h4>Utilisateurs</h4>
-              <input
-                type="text"
-                className="form-control mb-3"
-                placeholder="Rechercher un utilisateur"
-                value={search}
-                onChange={handleSearchChange}
-                aria-label="Rechercher un utilisateur"
-              />
-              <ul className="list-group">
-                {users.map((user) => (
-                  <li key={user._id} className="list-group-item d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center">
-                      {user.profilePicture ? (
-                        <img
-                          src={user.profilePicture}
-                          alt={`Photo de profil de ${user.username}`}
-                          className="rounded-circle me-2"
-                          style={{ width: '30px', height: '30px', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <FaUser className="me-2 text-muted" />
-                      )}
-                      {user.username || user.email}
-                    </div>
-                    <button
-                      className={`btn btn-sm ${follows.includes(user._id) ? 'btn-outline-secondary' : 'btn-primary'}`}
-                      onClick={() => (follows.includes(user._id) ? unfollowUser(user._id) : followUser(user._id))}
-                      disabled={loading}
-                      aria-label={follows.includes(user._id) ? `Ne plus suivre ${user.username || user.email}` : `Suivre ${user.username || user.email}`}
-                    >
-                      {follows.includes(user._id) ? <><FaUserCheck className="me-1" /> Ne plus suivre</> : <><FaUserPlus className="me-1" /> Suivre</>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {activeTab === 'feed' && isVerified && (
-            <div className="card p-4 bg-light text-dark rounded shadow-sm">
-              <h4>Fil</h4>
+          {activeTab === 'feed' && (
+            <div className="card p-4">
+              <h2>Fil d’actualité</h2>
               {feed.length === 0 ? (
                 <p>Aucun média à afficher. Suivez des utilisateurs pour voir leur contenu.</p>
               ) : (
                 feed.map((media) => (
                   <div key={media._id} className="card mb-3">
                     <div className="card-body">
-                      <div className="d-flex align-items-center mb-2">
-                        {media.owner?.profilePicture ? (
-                          <img
-                            src={media.owner.profilePicture}
-                            alt={`Photo de profil de ${media.owner.username}`}
-                            className="rounded-circle me-2"
-                            style={{ width: '30px', height: '30px', objectFit: 'cover' }}
-                          />
-                        ) : (
-                          <FaUser className="me-2 text-muted" />
-                        )}
-                        <h5 className="card-title mb-0">{media.owner?.username || media.owner?.email}</h5>
-                      </div>
+                      <h5>{media.originalname}</h5>
+                      <p>Par : {media.owner?.username || media.owner?.email}</p>
                       {media.youtubeUrl ? (
-                        <div className="ratio ratio-16x9">
-                          <iframe
-                            src={`${media.youtubeUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}`}
-                            title={media.originalname}
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                          ></iframe>
-                        </div>
-                      ) : media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                        <img
-                          src={`${API_URL}/uploads/${media.filename}`}
-                          alt={media.originalname}
-                          className="img-fluid rounded"
-                          style={{ maxHeight: '300px', objectFit: 'cover' }}
-                        />
+                        <iframe
+                          src={`${media.youtubeUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}`}
+                          title={media.originalname}
+                          className="w-100"
+                          style={{ aspectRatio: '16/9' }}
+                          frameBorder="0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                        ></iframe>
                       ) : (
-                        <video
-                          src={`${API_URL}/uploads/${media.filename}`}
-                          controls
-                          loop
-                          className="img-fluid rounded"
-                          style={{ maxHeight: '300px' }}
-                        />
-                      )}
-                      <p className="card-text mt-2">{media.originalname}</p>
-                      <div className="d-flex justify-content-between mb-2">
-                        <div>
-                          <button
-                            className={`btn btn-sm ${media.likes.includes(userId) ? 'btn-primary' : 'btn-outline-primary'} me-2`}
-                            onClick={() => likeMedia(media._id)}
-                            disabled={loading || media.dislikes.includes(userId)}
-                            aria-label={`Liker le média ${media.originalname}`}
-                          >
-                            <FaThumbsUp className="me-1" /> {media.likes.length}
-                          </button>
-                          <button
-                            className={`btn btn-sm ${media.dislikes.includes(userId) ? 'btn-danger' : 'btn-outline-danger'}`}
-                            onClick={() => dislikeMedia(media._id)}
-                            disabled={loading || media.likes.includes(userId)}
-                            aria-label={`Ne pas liker le média ${media.originalname}`}
-                          >
-                            <FaThumbsDown className="me-1" /> {media.dislikes.length}
-                          </button>
-                        </div>
-                        {media.owner?.whatsappNumber && (
-                          <a
-                            href={`https://wa.me/${media.owner.whatsappNumber}?text=${encodeURIComponent(
-                              `${media.owner.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'} ${window.location.origin}/media/${media._id}`
-                            )}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="btn btn-sm btn-success"
-                            aria-label="Partager sur WhatsApp"
-                          >
-                            <FaWhatsapp className="me-1" /> Partager
-                          </a>
-                        )}
-                      </div>
-                      <div className="mb-3">
-                        <h6>Commentaires</h6>
-                        {media.comments.length === 0 ? (
-                          <p>Aucun commentaire.</p>
+                        media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                          <img src={media.filename} alt={media.originalname} className="img-fluid" />
                         ) : (
-                          <ul className="list-group mb-2">
-                            {media.comments.map((comment) => (
-                              <li key={comment._id} className="list-group-item">
-                                <strong>{comment.author.username || comment.author.email}</strong>: {comment.content}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <div className="input-group">
+                          <video controls className="w-100">
+                            <source src={media.filename} type="video/mp4" />
+                          </video>
+                        )
+                      )}
+                      <div className="mt-2">
+                        <button
+                          className={`btn btn-sm ${media.isLiked ? 'btn-success' : 'btn-outline-success'}`}
+                          onClick={() => likeMedia(media._id)}
+                        >
+                          <FaThumbsUp /> {media.likesCount}
+                        </button>
+                        <button
+                          className={`btn btn-sm ms-2 ${media.isDisliked ? 'btn-danger' : 'btn-outline-danger'}`}
+                          onClick={() => dislikeMedia(media._id)}
+                        >
+                          <FaThumbsDown /> {media.dislikesCount}
+                        </button>
+                      </div>
+                      <div className="mt-3">
+                        <h6>Commentaires</h6>
+                        {media.comments.map((comment) => (
+                          <div key={comment._id} className="border-top pt-2">
+                            <p>
+                              <strong>{comment.author?.username || 'Anonyme'}</strong>: {comment.content}
+                            </p>
+                          </div>
+                        ))}
+                        <div className="input-group mt-2">
                           <input
                             type="text"
                             className="form-control"
-                            placeholder="Ajouter un commentaire"
                             value={commentText[media._id] || ''}
                             onChange={(e) =>
                               setCommentText((prev) => ({ ...prev, [media._id]: e.target.value }))
                             }
-                            aria-label={`Commenter le média ${media.originalname}`}
+                            placeholder="Ajouter un commentaire..."
                           />
                           <button
                             className="btn btn-primary"
                             onClick={() => addComment(media._id)}
-                            disabled={loading}
-                            aria-label="Envoyer le commentaire"
                           >
                             <FaPaperPlane />
                           </button>
@@ -1324,91 +1265,69 @@ export default function Profile() {
             </div>
           )}
 
-          {activeTab === 'my-medias' && isVerified && (
-            <div className="card p-4 bg-light text-dark rounded shadow-sm">
-              <h4>Mes médias</h4>
+          {activeTab === 'myMedias' && (
+            <div className="card p-4">
+              <h2>Mes médias</h2>
               {myMedias.length === 0 ? (
-                <p>Aucun média à afficher.</p>
+                <p>Aucun média uploadé.</p>
               ) : (
                 myMedias.map((media) => (
                   <div key={media._id} className="card mb-3">
-                    <div className="card-body d-flex align-items-center">
+                    <div className="card-body">
                       {editMediaId === media._id ? (
-                        <div className="w-100">
-                          <div className="input-group">
-                            <input
-                              type="text"
-                              className="form-control"
-                              value={newName}
-                              onChange={(e) => setNewName(e.target.value)}
-                              aria-label="Nouveau nom du média"
-                            />
-                            <button
-                              className="btn btn-success"
-                              onClick={() => saveNewName(media._id)}
-                              disabled={loading}
-                              aria-label="Sauvegarder le nouveau nom"
-                            >
-                              <FaSave />
-                            </button>
-                            <button
-                              className="btn btn-secondary"
-                              onClick={cancelEdit}
-                              disabled={loading}
-                              aria-label="Annuler l'édition"
-                            >
-                              <FaTimes />
-                            </button>
-                          </div>
+                        <div className="input-group mb-3">
+                          <input
+                            type="text"
+                            className="form-control"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                          />
+                          <button
+                            className="btn btn-success"
+                            onClick={() => saveNewName(media._id)}
+                          >
+                            <FaSave />
+                          </button>
+                          <button className="btn btn-secondary" onClick={cancelEdit}>
+                            <FaTimes />
+                          </button>
                         </div>
                       ) : (
-                        <>
-                          {media.youtubeUrl ? (
-                            <div className="ratio ratio-16x9 me-3">
-                              <iframe
-                                src={`${media.youtubeUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}`}
-                                title={media.originalname}
-                                frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                                style={{ width: '100px', height: '100px' }}
-                              ></iframe>
-                            </div>
-                          ) : media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                            <img
-                              src={`${API_URL}/uploads/${media.filename}`}
-                              alt={media.originalname}
-                              className="me-3 rounded"
-                              style={{ width: '100px', height: '100px', objectFit: 'cover' }}
-                            />
-                          ) : (
-                            <video
-                              src={`${API_URL}/uploads/${media.filename}`}
-                              className="me-3 rounded"
-                              style={{ width: '100px', height: '100px', objectFit: 'cover' }}
-                            />
-                          )}
-                          <div className="flex-grow-1">
-                            <p className="card-text mb-1">{media.originalname}</p>
-                            <button
-                              className="btn btn-sm btn-outline-primary me-2"
-                              onClick={() => startEditMedia(media)}
-                              disabled={loading}
-                              aria-label="Modifier le nom du média"
-                            >
-                              <FaEdit className="me-1" /> Modifier
-                            </button>
-                            <button
-                              className="btn btn-sm btn-outline-danger"
-                              onClick={() => deleteMedia(media._id)}
-                              disabled={loading}
-                              aria-label="Supprimer le média"
-                            >
-                              <FaTrash className="me-1" /> Supprimer
-                            </button>
-                          </div>
-                        </>
+                        <h5>{media.originalname}</h5>
                       )}
+                      {media.youtubeUrl ? (
+                        <iframe
+                          src={`${media.youtubeUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}`}
+                          title={media.originalname}
+                          className="w-100"
+                          style={{ aspectRatio: '16/9' }}
+                          frameBorder="0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                        ></iframe>
+                      ) : (
+                        media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                          <img src={media.filename} alt={media.originalname} className="img-fluid" />
+                        ) : (
+                          <video controls className="w-100">
+                            <source src={media.filename} type="video/mp4" />
+                          </video>
+                        )
+                      )}
+                      <div className="mt-2">
+                        <button
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => startEditMedia(media)}
+                        >
+                          <FaEdit /> Modifier
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-danger ms-2"
+                          onClick={() => deleteMedia(media._id)}
+                        >
+                          <FaTrash /> Supprimer
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))
@@ -1416,43 +1335,81 @@ export default function Profile() {
             </div>
           )}
 
-          {activeTab === 'dashboard' && isVerified && (
-            <div className="card p-4 bg-light text-dark rounded shadow-sm">
-              <h4>Tableau de bord</h4>
+          {activeTab === 'users' && (
+            <div className="card p-4">
+              <h2>Utilisateurs</h2>
               <div className="mb-3">
-                <h5>Espace disque</h5>
-                <p>Espace utilisé : {formatBytes(diskUsage.used)}</p>
-                <p>Espace total alloué : {formatBytes(diskUsage.total)}</p>
-                <p>Espace restant : {formatBytes(diskUsage.remaining)}</p>
-                <div className="progress">
-                  <div
-                    className="progress-bar"
-                    role="progressbar"
-                    style={{ width: `${(diskUsage.used / diskUsage.total) * 100}%` }}
-                    aria-valuenow={(diskUsage.used / diskUsage.total) * 100}
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                  >
-                    {((diskUsage.used / diskUsage.total) * 100).toFixed(2)}%
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Rechercher un utilisateur..."
+                  value={search}
+                  onChange={handleSearchChange}
+                />
+              </div>
+              {users.length === 0 ? (
+                <p>Aucun utilisateur trouvé.</p>
+              ) : (
+                users.map((user) => (
+                  <div key={user._id} className="card mb-3">
+                    <div className="card-body d-flex align-items-center">
+                      {user.profilePicture ? (
+                        <img
+                          src={user.profilePicture}
+                          alt={user.username}
+                          className="rounded-circle me-3"
+                          style={{ width: '50px', height: '50px', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <FaUser className="me-3" size={50} />
+                      )}
+                      <div>
+                        <h5>{user.username || user.email}</h5>
+                        <p>{user.email}</p>
+                        {user.whatsappNumber && (
+                          <p>
+                            <FaWhatsapp /> {user.whatsappNumber}
+                          </p>
+                        )}
+                      </div>
+                      <div className="ms-auto">
+                        {follows.includes(user._id) ? (
+                          <button
+                            className="btn btn-outline-danger"
+                            onClick={() => unfollowUser(user._id)}
+                          >
+                            <FaUserCheck /> Ne plus suivre
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-outline-primary"
+                            onClick={() => followUser(user._id)}
+                          >
+                            <FaUserPlus /> Suivre
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {activeTab === 'stats' && (
+            <div className="card p-4">
+              <h2>Statistiques</h2>
+              <p>Espace disque utilisé : {formatBytes(diskUsage.used)}</p>
+              <p>Espace disque restant : {formatBytes(diskUsage.remaining)}</p>
+              <p>Points : {points} FCFA</p>
+              <div className="progress mb-3">
+                <div
+                  className="progress-bar"
+                  style={{ width: `${(diskUsage.used / diskUsage.total) * 100}%` }}
+                >
+                  {(diskUsage.used / diskUsage.total) * 100}%
                 </div>
               </div>
-              <div className="mb-3">
-                <h5>Solde de points</h5>
-                <p>Points : {points} FCFA</p>
-              </div>
-              <button
-                className="btn btn-primary"
-                onClick={loadDiskUsage}
-                disabled={loading}
-                aria-label="Rafraîchir les données d’espace disque"
-              >
-                {loading ? (
-                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                ) : (
-                  <><FaChartPie className="me-1" /> Rafraîchir</>
-                )}
-              </button>
             </div>
           )}
         </>
