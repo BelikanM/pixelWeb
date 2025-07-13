@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera, FaChartPie } from 'react-icons/fa';
+import io from 'socket.io-client';
 import './Profile.css';
 
 const API_URL = 'http://localhost:5000';
+const socket = io(API_URL, {
+  auth: { token: localStorage.getItem('token') }
+});
 
 function parseJwt(token) {
   try {
@@ -31,6 +35,7 @@ export default function Profile() {
   const [feed, setFeed] = useState([]);
   const [myMedias, setMyMedias] = useState([]);
   const [file, setFile] = useState(null);
+  const [mediaName, setMediaName] = useState(''); // Ajout pour le nom du média
   const [editMediaId, setEditMediaId] = useState(null);
   const [newName, setNewName] = useState('');
   const [editUsername, setEditUsername] = useState('');
@@ -38,13 +43,13 @@ export default function Profile() {
   const [profilePicture, setProfilePicture] = useState('');
   const [selectedProfilePicture, setSelectedProfilePicture] = useState(null);
   const [diskUsage, setDiskUsage] = useState({ used: 0, total: 5 * 1024 * 1024 * 1024, remaining: 0 });
-  const [points, setPoints] = useState(0); // Solde de points
-  const [youtubeUrl, setYoutubeUrl] = useState(''); // URL YouTube
+  const [points, setPoints] = useState(0);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
   const [youtubeOptions, setYoutubeOptions] = useState({
     autoplay: false,
     muted: false,
     subtitles: false,
-  }); // Options de lecture YouTube
+  });
 
   // Charger profil utilisateur
   const loadProfile = useCallback(async () => {
@@ -61,8 +66,8 @@ export default function Profile() {
         setEditUsername(data.username || '');
         setWhatsappNumber(data.whatsappNumber || '');
         setIsVerified(data.isVerified || false);
-        setProfilePicture(data.profilePicture || '');
-        setPoints(data.points || 0); // Charger les points
+        setProfilePicture(data.profilePicture ? `${API_URL}/uploads/profiles/${data.profilePicture}` : '');
+        setPoints(data.points || 0);
       } else {
         setMessage(data.message || 'Erreur chargement profil');
         if (res.status === 401 || res.status === 403) {
@@ -394,9 +399,7 @@ export default function Profile() {
         setIsVerified(data.user.isVerified);
         setProfilePicture(data.user.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
         setSelectedProfilePicture(null);
-        setPoints(data.user.points || 0); // Mettre à jour les points
-        loadProfile();
-        loadDiskUsage();
+        setPoints(data.user.points || 0);
       } else {
         setMessage(data.message || 'Erreur mise à jour profil');
         if (res.status === 401 || res.status === 403) {
@@ -411,7 +414,7 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, editUsername, whatsappNumber, selectedProfilePicture, isVerified, loadProfile, loadDiskUsage]);
+  }, [token, editUsername, whatsappNumber, selectedProfilePicture, isVerified]);
 
   // Upload média ou URL YouTube
   const handleUpload = useCallback(
@@ -421,12 +424,19 @@ export default function Profile() {
         setMessage('Veuillez vérifier votre email avant d’uploader des fichiers');
         return;
       }
+      if (!mediaName.trim()) {
+        setMessage('Le nom du média est requis');
+        return;
+      }
       if (!file && !youtubeUrl) {
         setMessage('Veuillez choisir un fichier ou entrer une URL YouTube');
         return;
       }
+      if (file && youtubeUrl) {
+        setMessage('Veuillez choisir soit un fichier, soit une URL YouTube, pas les deux');
+        return;
+      }
       if (youtubeUrl) {
-        // Validation de l'URL YouTube
         const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
         if (!youtubeRegex.test(youtubeUrl)) {
           setMessage('URL YouTube invalide');
@@ -436,6 +446,7 @@ export default function Profile() {
       setLoading(true);
       try {
         const formData = new FormData();
+        formData.append('originalname', mediaName);
         if (file) {
           formData.append('media', file);
         } else if (youtubeUrl) {
@@ -451,6 +462,7 @@ export default function Profile() {
         if (res.ok) {
           setMessage(data.message);
           setFile(null);
+          setMediaName('');
           setYoutubeUrl('');
           setYoutubeOptions({ autoplay: false, muted: false, subtitles: false });
           loadFeed();
@@ -465,7 +477,7 @@ export default function Profile() {
         setLoading(false);
       }
     },
-    [token, file, youtubeUrl, youtubeOptions, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
+    [token, file, mediaName, youtubeUrl, youtubeOptions, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
   );
 
   // Recherche utilisateurs
@@ -521,7 +533,7 @@ export default function Profile() {
           setWhatsappNumber(data.user?.whatsappNumber || '');
           setIsVerified(data.user?.isVerified || false);
           setProfilePicture(data.user?.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
-          setPoints(data.user.points || 0); // Initialiser les points
+          setPoints(data.user.points || 0);
           setMessage('Connecté avec succès !');
         } else {
           setMessage('Inscription réussie. Vérifiez votre email pour activer votre compte.');
@@ -583,19 +595,24 @@ export default function Profile() {
     return `${value.toFixed(2)} ${units[unitIndex]}`;
   };
 
+  // WebSocket listener pour la mise à jour de la photo de profil
+  useEffect(() => {
+    socket.on('profilePictureUpdate', ({ userId: updatedUserId, profilePicture }) => {
+      if (updatedUserId === userId) {
+        setProfilePicture(profilePicture ? `${API_URL}/uploads/profiles/${profilePicture}` : '');
+      }
+    });
+
+    return () => {
+      socket.off('profilePictureUpdate');
+    };
+  }, [userId]);
+
   // Chargement initial
   useEffect(() => {
     if (token) {
       const decoded = parseJwt(token);
       setUserId(decoded?.userId || null);
-      setMessage('');
-      setEmail('');
-      setPassword('');
-      setUsername('');
-      setEditUsername('');
-      setWhatsappNumber('');
-      setProfilePicture('');
-      setPoints(0);
       setIsLogin(true);
       loadProfile();
       if (isVerified) {
@@ -902,6 +919,19 @@ export default function Profile() {
               <h4>Uploader un média ou une vidéo YouTube</h4>
               <form onSubmit={handleUpload}>
                 <div className="mb-3">
+                  <label htmlFor="mediaName" className="form-label">Nom du média</label>
+                  <input
+                    type="text"
+                    id="mediaName"
+                    className="form-control"
+                    placeholder="Entrez le nom du média"
+                    value={mediaName}
+                    onChange={(e) => setMediaName(e.target.value)}
+                    required
+                    aria-label="Nom du média"
+                  />
+                </div>
+                <div className="mb-3">
                   <label htmlFor="file" className="form-label">Choisir un fichier (image/vidéo)</label>
                   <input
                     type="file"
@@ -910,7 +940,7 @@ export default function Profile() {
                     accept="image/*,video/*"
                     onChange={(e) => {
                       setFile(e.target.files[0]);
-                      setYoutubeUrl(''); // Réinitialiser l'URL YouTube si fichier sélectionné
+                      setYoutubeUrl('');
                     }}
                     aria-label="Choisir un fichier"
                   />
@@ -925,7 +955,7 @@ export default function Profile() {
                     value={youtubeUrl}
                     onChange={(e) => {
                       setYoutubeUrl(e.target.value);
-                      setFile(null); // Réinitialiser le fichier si URL YouTube saisie
+                      setFile(null);
                     }}
                     aria-label="URL YouTube"
                   />
