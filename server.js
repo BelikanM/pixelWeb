@@ -1,3 +1,4 @@
+// Importation des dépendances
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -13,6 +14,7 @@ const { Server } = require('socket.io');
 const webPush = require('web-push');
 const fs = require('fs').promises;
 
+// Initialisation de l'application Express et du serveur HTTP
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -24,7 +26,8 @@ const io = new Server(server, {
   pingInterval: 25000,
 });
 
-app.use(cors());
+// Middleware
+app.use(cors({ origin: 'http://localhost:3000', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
   setHeaders: (res) => {
@@ -33,14 +36,17 @@ app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
 }));
 app.use('/uploads/profiles', express.static(path.join(__dirname, 'Uploads', 'profiles')));
 
-// Configuration des clés VAPID
+// Configuration des clés VAPID pour les notifications push
+if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+  console.error('❌ Clés VAPID non configurées');
+}
 webPush.setVapidDetails(
   `mailto:${process.env.EMAIL_USER}`,
   process.env.VAPID_PUBLIC_KEY,
   process.env.VAPID_PRIVATE_KEY
 );
 
-// Connexion MongoDB
+// Connexion à MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -91,13 +97,13 @@ const mediaSchema = new mongoose.Schema({
 });
 const Media = mongoose.model('Media', mediaSchema);
 
-// Configuration Nodemailer
+// Configuration Nodemailer pour l'envoi d'emails
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
 });
 
-// JWT
+// Configuration JWT
 const JWT_SECRET = process.env.JWT_SECRET;
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization'];
@@ -111,7 +117,7 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Multer config pour médias
+// Configuration Multer pour les médias
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadPath = path.join(__dirname, 'Uploads');
@@ -129,7 +135,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
   fileFilter: (req, file, cb) => {
     const fileTypes = /jpeg|jpg|png|gif|mp4|mov|avi/;
     const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());
@@ -142,7 +148,7 @@ const upload = multer({
   }
 });
 
-// Multer config pour photo de profil
+// Configuration Multer pour les photos de profil
 const profileStorage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadPath = path.join(__dirname, 'Uploads', 'profiles');
@@ -160,7 +166,7 @@ const profileStorage = multer.diskStorage({
 });
 const uploadProfile = multer({
   storage: profileStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
   fileFilter: (req, file, cb) => {
     const fileTypes = /jpeg|jpg|png/;
     const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());
@@ -173,7 +179,7 @@ const uploadProfile = multer({
   }
 });
 
-// Générer un code de vérification
+// Fonction pour générer un code de vérification
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
@@ -388,58 +394,58 @@ app.post('/subscribe', verifyToken, async (req, res) => {
   }
 });
 
-// Inscription
+// Route pour l'inscription
 app.post('/register', async (req, res) => {
   const { email, password, username, whatsappNumber, whatsappMessage } = req.body;
-  const existing = await User.findOne({ email });
-  if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
-
-  const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
-  if (username && !usernameRegex.test(username)) {
-    return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
-  }
-
-  const phoneRegex = /^\+?[1-9]\d{1,14}$/;
-  if (whatsappNumber && !phoneRegex.test(whatsappNumber)) {
-    return res.status(400).json({ message: 'Numéro WhatsApp invalide (format international requis, ex: +1234567890)' });
-  }
-
-  const hashed = await bcrypt.hash(password, 10);
-  const verificationToken = crypto.randomBytes(32).toString('hex');
-  const user = await User.create({
-    email,
-    password: hashed,
-    username: username || email.split('@')[0],
-    whatsappNumber: whatsappNumber || '',
-    whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !',
-    verificationToken,
-    profilePicture: '',
-    points: 100,
-  });
-
-  const verificationLink = `http://localhost:5000/verify-email?token=${verificationToken}`;
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject: 'Vérifiez votre adresse email - Pixels Media',
-    html: `
-      <h2>Bienvenue sur Pixels Media !</h2>
-      <p>Veuillez vérifier votre adresse email en cliquant sur le lien suivant :</p>
-      <a href="${verificationLink}">Vérifier mon email</a>
-      <p>Ce lien expire dans 24 heures.</p>
-    `,
-  };
-
   try {
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
+
+    const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+    if (username && !usernameRegex.test(username)) {
+      return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
+    }
+
+    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+    if (whatsappNumber && !phoneRegex.test(whatsappNumber)) {
+      return res.status(400).json({ message: 'Numéro WhatsApp invalide (format international requis, ex: +1234567890)' });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const user = await User.create({
+      email,
+      password: hashed,
+      username: username || email.split('@')[0],
+      whatsappNumber: whatsappNumber || '',
+      whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !',
+      verificationToken,
+      profilePicture: '',
+      points: 100,
+    });
+
+    const verificationLink = `http://localhost:5000/verify-email?token=${verificationToken}`;
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Vérifiez votre adresse email - Pixels Media',
+      html: `
+        <h2>Bienvenue sur Pixels Media !</h2>
+        <p>Veuillez vérifier votre adresse email en cliquant sur le lien suivant :</p>
+        <a href="${verificationLink}">Vérifier mon email</a>
+        <p>Ce lien expire dans 24 heures.</p>
+      `,
+    };
+
     await transporter.sendMail(mailOptions);
     res.status(201).json({ message: 'Utilisateur inscrit. Vérifiez votre email.' });
   } catch (error) {
-    console.error('Erreur envoi email:', error);
-    res.status(500).json({ message: 'Utilisateur inscrit, mais erreur email.' });
+    console.error('Erreur /register:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Demander un nouveau code de vérification
+// Route pour demander un nouveau code de vérification
 app.post('/request-verification', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -475,7 +481,7 @@ app.post('/request-verification', verifyToken, async (req, res) => {
   }
 });
 
-// Vérifier le code
+// Route pour vérifier le code de vérification
 app.post('/verify-code', verifyToken, async (req, res) => {
   const { code } = req.body;
   try {
@@ -502,7 +508,7 @@ app.post('/verify-code', verifyToken, async (req, res) => {
   }
 });
 
-// Vérification email
+// Route pour vérifier l'email via lien
 app.get('/verify-email', async (req, res) => {
   const { token } = req.query;
   try {
@@ -522,32 +528,37 @@ app.get('/verify-email', async (req, res) => {
   }
 });
 
-// Connexion
+// Route pour la connexion
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-  if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+  try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-  const isValid = await bcrypt.compare(password, user.password);
-  if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
 
-  const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '2h' });
-  res.json({
-    token,
-    user: {
-      email: user.email,
-      username: user.username,
-      isVerified: user.isVerified,
-      whatsappNumber: user.whatsappNumber,
-      whatsappMessage: user.whatsappMessage,
-      profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : '',
-      points: user.points
-    }
-  });
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '2h' });
+    res.json({
+      token,
+      user: {
+        email: user.email,
+        username: user.username,
+        isVerified: user.isVerified,
+        whatsappNumber: user.whatsappNumber,
+        whatsappMessage: user.whatsappMessage,
+        profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : '',
+        points: user.points
+      }
+    });
+  } catch (error) {
+    console.error('Erreur /login:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
 });
 
-// Profil utilisateur
+// Route pour récupérer le profil utilisateur
 app.get('/profile', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
@@ -564,24 +575,24 @@ app.get('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Mettre à jour le profil
+// Route pour mettre à jour le profil
 app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (req, res) => {
   const { username, whatsappNumber, whatsappMessage } = req.body;
-  if (!username || !username.trim()) {
-    return res.status(400).json({ message: 'Le nom d’utilisateur ne peut pas être vide' });
-  }
-
-  const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
-  if (!usernameRegex.test(username)) {
-    return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
-  }
-
-  const phoneRegex = /^\+?[1-9]\d{1,14}$/;
-  if (whatsappNumber && !phoneRegex.test(whatsappNumber)) {
-    return res.status(400).json({ message: 'Numéro WhatsApp invalide (format international requis, ex: +1234567890)' });
-  }
-
   try {
+    if (!username || !username.trim()) {
+      return res.status(400).json({ message: 'Le nom d’utilisateur ne peut pas être vide' });
+    }
+
+    const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+    if (!usernameRegex.test(username)) {
+      return res.status(400).json({ message: 'Nom d’utilisateur invalide (3-20 caractères, lettres, chiffres, -, _)' });
+    }
+
+    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+    if (whatsappNumber && !phoneRegex.test(whatsappNumber)) {
+      return res.status(400).json({ message: 'Numéro WhatsApp invalide (format international requis, ex: +1234567890)' });
+    }
+
     const user = await User.findById(req.user.userId);
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
 
@@ -626,7 +637,7 @@ app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (
   }
 });
 
-// Upload média
+// Route pour uploader un média
 app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
   const { youtubeUrl, originalname, autoplay, muted, subtitles } = req.body;
   try {
@@ -694,7 +705,7 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
   }
 });
 
-// Feed des médias des abonnés
+// Route pour récupérer le feed des médias des abonnés
 app.get('/feed', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).lean();
@@ -734,7 +745,7 @@ app.get('/feed', verifyToken, async (req, res) => {
   }
 });
 
-// Liste des utilisateurs
+// Route pour lister les utilisateurs
 app.get('/users', verifyToken, async (req, res) => {
   try {
     const q = req.query.q || '';
@@ -755,7 +766,7 @@ app.get('/users', verifyToken, async (req, res) => {
   }
 });
 
-// Liste des followings
+// Route pour lister les utilisateurs suivis
 app.get('/follows', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
@@ -771,7 +782,7 @@ app.get('/follows', verifyToken, async (req, res) => {
   }
 });
 
-// Suivre un utilisateur
+// Route pour suivre un utilisateur
 app.post('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
@@ -785,6 +796,7 @@ app.post('/follow', verifyToken, async (req, res) => {
 
     user.following.push(followingId);
     user.points -= 50;
+    if (user.points < 0) return res.status(403).json({ message: 'Points négatifs non autorisés' });
     await user.save();
 
     res.json({ message: 'Abonnement effectué', points: user.points });
@@ -795,7 +807,7 @@ app.post('/follow', verifyToken, async (req, res) => {
   }
 });
 
-// Ne plus suivre
+// Route pour se désabonner
 app.delete('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
@@ -813,7 +825,7 @@ app.delete('/follow', verifyToken, async (req, res) => {
   }
 });
 
-// Récupérer ses propres médias
+// Route pour récupérer ses propres médias
 app.get('/my-medias', verifyToken, async (req, res) => {
   try {
     const list = await Media.find({ owner: req.user.userId })
@@ -830,7 +842,7 @@ app.get('/my-medias', verifyToken, async (req, res) => {
   }
 });
 
-// Modifier le nom d’un fichier
+// Route pour modifier le nom d’un média
 app.put('/media/:id', verifyToken, async (req, res) => {
   try {
     const media = await Media.findById(req.params.id);
@@ -880,7 +892,7 @@ app.put('/media/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Supprimer un fichier
+// Route pour supprimer un média
 app.delete('/media/:id', verifyToken, async (req, res) => {
   try {
     const media = await Media.findById(req.params.id);
@@ -889,7 +901,9 @@ app.delete('/media/:id', verifyToken, async (req, res) => {
 
     if (media.filename) {
       try {
-        await fs.unlink(path.join(__dirname, 'Uploads', media.filename));
+        const filePath = path.join(__dirname, 'Uploads', media.filename);
+        await fs.access(filePath);
+        await fs.unlink(filePath);
       } catch (err) {
         console.error(`Erreur lors de la suppression du fichier ${media.filename}:`, err);
       }
@@ -904,7 +918,7 @@ app.delete('/media/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Ajouter un like
+// Route pour ajouter un like
 app.post('/like/:mediaId', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -921,10 +935,11 @@ app.post('/like/:mediaId', verifyToken, async (req, res) => {
     media.likes.push(req.user.userId);
     media.dislikes = media.dislikes.filter(userId => userId.toString() !== req.user.userId);
     user.points -= 10;
+    if (user.points < 0) return res.status(403).json({ message: 'Points négatifs non autorisés' });
     await Promise.all([media.save(), user.save()]);
 
     res.json({ message: 'Média aimé', likesCount: media.likes.length, dislikesCount: media.dislikes.length, points: user.points });
-    io.emit('likeUpdate', {
+    io.to(media.owner.toString()).emit('likeUpdate', {
       mediaId: req.params.mediaId,
       likesCount: media.likes.length,
       dislikesCount: media.dislikes.length,
@@ -937,7 +952,7 @@ app.post('/like/:mediaId', verifyToken, async (req, res) => {
   }
 });
 
-// Retirer un like
+// Route pour retirer un like
 app.delete('/like/:mediaId', verifyToken, async (req, res) => {
   try {
     const media = await Media.findById(req.params.mediaId);
@@ -951,7 +966,7 @@ app.delete('/like/:mediaId', verifyToken, async (req, res) => {
     await media.save();
 
     res.json({ message: 'Like retiré', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('unlikeUpdate', {
+    io.to(media.owner.toString()).emit('unlikeUpdate', {
       mediaId: req.params.mediaId,
       likesCount: media.likes.length,
       dislikesCount: media.dislikes.length,
@@ -963,7 +978,7 @@ app.delete('/like/:mediaId', verifyToken, async (req, res) => {
   }
 });
 
-// Ajouter un dislike
+// Route pour ajouter un dislike
 app.post('/dislike/:mediaId', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -981,7 +996,7 @@ app.post('/dislike/:mediaId', verifyToken, async (req, res) => {
     await media.save();
 
     res.json({ message: 'Média marqué comme non apprécié', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('dislikeUpdate', {
+    io.to(media.owner.toString()).emit('dislikeUpdate', {
       mediaId: req.params.mediaId,
       likesCount: media.likes.length,
       dislikesCount: media.dislikes.length,
@@ -993,7 +1008,7 @@ app.post('/dislike/:mediaId', verifyToken, async (req, res) => {
   }
 });
 
-// Retirer un dislike
+// Route pour retirer un dislike
 app.delete('/dislike/:mediaId', verifyToken, async (req, res) => {
   try {
     const media = await Media.findById(req.params.mediaId);
@@ -1007,7 +1022,7 @@ app.delete('/dislike/:mediaId', verifyToken, async (req, res) => {
     await media.save();
 
     res.json({ message: 'Dislike retiré', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('undislikeUpdate', {
+    io.to(media.owner.toString()).emit('undislikeUpdate', {
       mediaId: req.params.mediaId,
       likesCount: media.likes.length,
       dislikesCount: media.dislikes.length,
@@ -1019,7 +1034,7 @@ app.delete('/dislike/:mediaId', verifyToken, async (req, res) => {
   }
 });
 
-// Ajouter un commentaire
+// Route pour ajouter un commentaire
 app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -1031,8 +1046,8 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
 
     const { content } = req.body;
-    if (!content && !req.file) {
-      return res.status(400).json({ message: 'Le commentaire ou le média ne peut pas être vide' });
+    if (!content?.trim() && !req.file) {
+      return res.status(400).json({ message: 'Le commentaire doit contenir du texte ou un média' });
     }
 
     const existingComment = media.comments.find(
@@ -1052,6 +1067,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     };
     media.comments.push(newComment);
     user.points -= 25;
+    if (user.points < 0) return res.status(403).json({ message: 'Points négatifs non autorisés' });
     await Promise.all([media.save(), user.save()]);
 
     if (media.owner._id.toString() !== req.user.userId) {
@@ -1064,6 +1080,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
             <h2 style="color: #333;">Nouveau commentaire sur votre média</h2>
             <p style="color: #555;">${user.username || user.email} a commenté votre média "${media.originalname}":</p>
             <p style="color: #555;">${content || 'Média ajouté'}</p>
+            ${req.file ? `<img src="${req.protocol}://${req.get('host')}/uploads/${req.file.filename}" alt="Commentaire média" style="max-width: 100%; height: auto;" />` : ''}
             <p style="color: #555;">Visitez votre fil pour voir le commentaire.</p>
           </div>
         `,
@@ -1081,7 +1098,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
         title: 'Nouveau commentaire sur votre média',
         body: `${user.username || user.email} a commenté votre média "${media.originalname}": ${content || 'Média ajouté'}`,
         icon: '/logo192.png',
-        data: { url: 'http://localhost:3000' },
+        data: { url: `http://localhost:3000/media/${media._id}` },
       });
 
       try {
@@ -1099,16 +1116,19 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
       points: user.points,
       comments: updatedMedia.comments.map(comment => ({
         ...comment,
+        media: comment.media ? `${req.protocol}://${req.get('host')}/uploads/${comment.media}` : null,
         author: {
           ...comment.author,
           profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
         }
       }))
     });
-    io.emit('commentUpdate', {
+
+    io.to(media.owner._id.toString()).emit('commentUpdate', {
       mediaId: req.params.mediaId,
       comment: {
         ...newComment,
+        media: newComment.media ? `${req.protocol}://${req.get('host')}/uploads/${newComment.media}` : null,
         author: {
           _id: req.user.userId,
           username: user.username,
@@ -1122,7 +1142,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
   }
 });
 
-// Modifier un commentaire
+// Route pour modifier un commentaire
 app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -1139,13 +1159,15 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     }
 
     const { content } = req.body;
-    if (!content && !req.file) {
-      return res.status(400).json({ message: 'Le commentaire ou le média ne peut pas être vide' });
+    if (!content?.trim() && !req.file) {
+      return res.status(400).json({ message: 'Le commentaire doit contenir du texte ou un média' });
     }
 
     if (req.file && comment.media) {
       try {
-        await fs.unlink(path.join(__dirname, 'Uploads', comment.media));
+        const oldMediaPath = path.join(__dirname, 'Uploads', comment.media);
+        await fs.access(oldMediaPath);
+        await fs.unlink(oldMediaPath);
       } catch (err) {
         console.error(`Erreur lors de la suppression de l'ancienne média du commentaire ${comment.media}:`, err);
       }
@@ -1166,6 +1188,7 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
             <h2 style="color: #333;">Commentaire modifié sur votre média</h2>
             <p style="color: #555;">${user.username || user.email} a modifié un commentaire sur votre média "${media.originalname}":</p>
             <p style="color: #555;">${content || 'Média modifié'}</p>
+            ${req.file ? `<img src="${req.protocol}://${req.get('host')}/uploads/${req.file.filename}" alt="Commentaire média" style="max-width: 100%; height: auto;" />` : ''}
             <p style="color: #555;">Visitez votre fil pour voir le commentaire.</p>
           </div>
         `,
@@ -1183,7 +1206,7 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
         title: 'Commentaire modifié sur votre média',
         body: `${user.username || user.email} a modifié un commentaire sur votre média "${media.originalname}": ${content || 'Média modifié'}`,
         icon: '/logo192.png',
-        data: { url: 'http://localhost:3000' },
+        data: { url: `http://localhost:3000/media/${media._id}` },
       });
 
       try {
@@ -1200,13 +1223,15 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
       message: 'Commentaire modifié',
       comments: updatedMedia.comments.map(comment => ({
         ...comment,
+        media: comment.media ? `${req.protocol}://${req.get('host')}/uploads/${comment.media}` : null,
         author: {
           ...comment.author,
           profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
         }
       }))
     });
-    io.emit('commentUpdate', {
+
+    io.to(media.owner._id.toString()).emit('commentUpdate', {
       mediaId: req.params.mediaId,
       comment: {
         _id: req.params.commentId,
@@ -1226,7 +1251,7 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
   }
 });
 
-// Supprimer un commentaire
+// Route pour supprimer un commentaire
 app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -1244,7 +1269,9 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
 
     if (comment.media) {
       try {
-        await fs.unlink(path.join(__dirname, 'Uploads', comment.media));
+        const mediaPath = path.join(__dirname, 'Uploads', comment.media);
+        await fs.access(mediaPath);
+        await fs.unlink(mediaPath);
       } catch (err) {
         console.error(`Erreur lors de la suppression du média du commentaire ${comment.media}:`, err);
       }
@@ -1279,7 +1306,7 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
         title: 'Commentaire supprimé sur votre média',
         body: `${user.username || user.email} a supprimé un commentaire sur votre média "${media.originalname}".`,
         icon: '/logo192.png',
-        data: { url: 'http://localhost:3000' },
+        data: { url: `http://localhost:3000/media/${media._id}` },
       });
 
       try {
@@ -1290,14 +1317,14 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
     }
 
     res.json({ message: 'Commentaire supprimé', comments: media.comments });
-    io.emit('commentDeleted', { mediaId: req.params.mediaId, commentId: req.params.commentId });
+    io.to(media.owner._id.toString()).emit('commentDeleted', { mediaId: req.params.mediaId, commentId: req.params.commentId });
   } catch (error) {
     console.error('Erreur /comment/:mediaId/:commentId DELETE:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Enregistrer une vue
+// Route pour enregistrer une vue
 app.post('/view/:mediaId', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -1366,6 +1393,6 @@ app.get('/disk-usage', verifyToken, async (req, res) => {
   }
 });
 
-// Lancement serveur
+// Lancement du serveur
 const PORT = process.env.SERVER_PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Serveur actif sur http://localhost:${PORT}`));

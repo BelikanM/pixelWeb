@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera, FaChartPie } from 'react-icons/fa';
+import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera, FaChartPie, FaThumbsUp, FaThumbsDown, FaComment } from 'react-icons/fa';
 import io from 'socket.io-client';
 import './Profile.css';
 
 const API_URL = 'http://localhost:5000';
-const socket = io(API_URL, {
-  auth: { token: localStorage.getItem('token') }
-});
+const socket = io(API_URL, { auth: { token: localStorage.getItem('token') } });
 
 function parseJwt(token) {
   try {
@@ -35,7 +33,6 @@ export default function Profile() {
   const [feed, setFeed] = useState([]);
   const [myMedias, setMyMedias] = useState([]);
   const [file, setFile] = useState(null);
-  const [mediaName, setMediaName] = useState(''); // Ajout pour le nom du média
   const [editMediaId, setEditMediaId] = useState(null);
   const [newName, setNewName] = useState('');
   const [editUsername, setEditUsername] = useState('');
@@ -45,11 +42,9 @@ export default function Profile() {
   const [diskUsage, setDiskUsage] = useState({ used: 0, total: 5 * 1024 * 1024 * 1024, remaining: 0 });
   const [points, setPoints] = useState(0);
   const [youtubeUrl, setYoutubeUrl] = useState('');
-  const [youtubeOptions, setYoutubeOptions] = useState({
-    autoplay: false,
-    muted: false,
-    subtitles: false,
-  });
+  const [youtubeOptions, setYoutubeOptions] = useState({ autoplay: false, muted: false, subtitles: false });
+  const [mediaName, setMediaName] = useState(''); // Nouveau champ pour le nom du média
+  const [commentText, setCommentText] = useState({}); // Commentaires par média
 
   // Charger profil utilisateur
   const loadProfile = useCallback(async () => {
@@ -66,7 +61,7 @@ export default function Profile() {
         setEditUsername(data.username || '');
         setWhatsappNumber(data.whatsappNumber || '');
         setIsVerified(data.isVerified || false);
-        setProfilePicture(data.profilePicture ? `${API_URL}/uploads/profiles/${data.profilePicture}` : '');
+        setProfilePicture(data.profilePicture || '');
         setPoints(data.points || 0);
       } else {
         setMessage(data.message || 'Erreur chargement profil');
@@ -238,6 +233,7 @@ export default function Profile() {
       const data = await res.json();
       if (res.ok) {
         setMessage(data.message);
+        setPoints(data.points);
         loadFollows();
         loadFeed();
       } else {
@@ -400,6 +396,8 @@ export default function Profile() {
         setProfilePicture(data.user.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
         setSelectedProfilePicture(null);
         setPoints(data.user.points || 0);
+        loadProfile();
+        loadDiskUsage();
       } else {
         setMessage(data.message || 'Erreur mise à jour profil');
         if (res.status === 401 || res.status === 403) {
@@ -414,7 +412,7 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [token, editUsername, whatsappNumber, selectedProfilePicture, isVerified]);
+  }, [token, editUsername, whatsappNumber, selectedProfilePicture, isVerified, loadProfile, loadDiskUsage]);
 
   // Upload média ou URL YouTube
   const handleUpload = useCallback(
@@ -424,16 +422,12 @@ export default function Profile() {
         setMessage('Veuillez vérifier votre email avant d’uploader des fichiers');
         return;
       }
-      if (!mediaName.trim()) {
-        setMessage('Le nom du média est requis');
-        return;
-      }
       if (!file && !youtubeUrl) {
         setMessage('Veuillez choisir un fichier ou entrer une URL YouTube');
         return;
       }
-      if (file && youtubeUrl) {
-        setMessage('Veuillez choisir soit un fichier, soit une URL YouTube, pas les deux');
+      if (!mediaName.trim()) {
+        setMessage('Le nom du média est requis');
         return;
       }
       if (youtubeUrl) {
@@ -446,10 +440,11 @@ export default function Profile() {
       setLoading(true);
       try {
         const formData = new FormData();
-        formData.append('originalname', mediaName);
         if (file) {
           formData.append('media', file);
-        } else if (youtubeUrl) {
+        }
+        formData.append('originalname', mediaName);
+        if (youtubeUrl) {
           formData.append('youtubeUrl', youtubeUrl);
           formData.append('youtubeOptions', JSON.stringify(youtubeOptions));
         }
@@ -477,8 +472,96 @@ export default function Profile() {
         setLoading(false);
       }
     },
-    [token, file, mediaName, youtubeUrl, youtubeOptions, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
+    [token, file, youtubeUrl, youtubeOptions, mediaName, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
   );
+
+  // Liker un média
+  const likeMedia = useCallback(async (id) => {
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant d’interagir');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/media/${id}/like`, {
+        method: 'POST',
+        headers: { Authorization: token },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        setPoints(data.points);
+        loadFeed();
+      } else {
+        setMessage(data.message || 'Erreur lors du like');
+      }
+    } catch {
+      setMessage('Erreur réseau lors du like');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, loadFeed, isVerified]);
+
+  // Dé-liker un média
+  const dislikeMedia = useCallback(async (id) => {
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant d’interagir');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/media/${id}/dislike`, {
+        method: 'POST',
+        headers: { Authorization: token },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        setPoints(data.points);
+        loadFeed();
+      } else {
+        setMessage(data.message || 'Erreur lors du dislike');
+      }
+    } catch {
+      setMessage('Erreur réseau lors du dislike');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, loadFeed, isVerified]);
+
+  // Ajouter un commentaire
+  const addComment = useCallback(async (mediaId) => {
+    if (!isVerified) {
+      setMessage('Veuillez vérifier votre email avant de commenter');
+      return;
+    }
+    const content = commentText[mediaId]?.trim();
+    if (!content) {
+      setMessage('Le commentaire ne peut pas être vide');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/media/${mediaId}/comment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: token },
+        body: JSON.stringify({ content }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        setPoints(data.points);
+        setCommentText((prev) => ({ ...prev, [mediaId]: '' }));
+        loadFeed();
+      } else {
+        setMessage(data.message || 'Erreur lors de l’ajout du commentaire');
+      }
+    } catch {
+      setMessage('Erreur réseau lors de l’ajout du commentaire');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, commentText, loadFeed, isVerified]);
 
   // Recherche utilisateurs
   const handleSearchChange = useCallback(
@@ -527,6 +610,8 @@ export default function Profile() {
         if (isLogin) {
           localStorage.setItem('token', data.token);
           setToken(data.token);
+          socket.auth = { token: data.token };
+          socket.connect();
           setEmail(data.user?.email || '');
           setUsername(data.user?.username || '');
           setEditUsername(data.user?.username || '');
@@ -556,6 +641,7 @@ export default function Profile() {
 
   // Déconnexion
   const handleLogout = useCallback(() => {
+    socket.disconnect();
     localStorage.removeItem('token');
     setToken(null);
     setIsLogin(false);
@@ -595,27 +681,84 @@ export default function Profile() {
     return `${value.toFixed(2)} ${units[unitIndex]}`;
   };
 
-  // WebSocket listener pour la mise à jour de la photo de profil
+  // WebSocket listeners
   useEffect(() => {
+    socket.on('connect', () => {
+      console.log('Connecté à WebSocket');
+      socket.emit('join', userId);
+    });
+
+    socket.on('updateMedia', (updatedMedia) => {
+      setFeed((prev) =>
+        prev.map((media) =>
+          media._id === updatedMedia._id
+            ? { ...media, likes: updatedMedia.likes, dislikes: updatedMedia.dislikes, comments: updatedMedia.comments }
+            : media
+        )
+      );
+      setMyMedias((prev) =>
+        prev.map((media) =>
+          media._id === updatedMedia._id
+            ? { ...media, likes: updatedMedia.likes, dislikes: updatedMedia.dislikes, comments: updatedMedia.comments }
+            : media
+        )
+      );
+    });
+
+    socket.on('updatePoints', (newPoints) => {
+      setPoints(newPoints);
+    });
+
+    socket.on('updateFollows', (newFollows) => {
+      setFollows(newFollows);
+      loadFeed();
+    });
+
     socket.on('profilePictureUpdate', ({ userId: updatedUserId, profilePicture }) => {
+      setUsers((prev) =>
+        prev.map((user) =>
+          user._id === updatedUserId ? { ...user, profilePicture } : user
+        )
+      );
+      setFeed((prev) =>
+        prev.map((media) =>
+          media.owner._id === updatedUserId
+            ? { ...media, owner: { ...media.owner, profilePicture } }
+            : media
+        )
+      );
       if (updatedUserId === userId) {
-        setProfilePicture(profilePicture ? `${API_URL}/uploads/profiles/${profilePicture}` : '');
+        setProfilePicture(profilePicture);
       }
     });
 
     return () => {
+      socket.off('connect');
+      socket.off('updateMedia');
+      socket.off('updatePoints');
+      socket.off('updateFollows');
       socket.off('profilePictureUpdate');
     };
-  }, [userId]);
+  }, [userId, loadFeed]);
 
   // Chargement initial
   useEffect(() => {
     if (token) {
       const decoded = parseJwt(token);
       setUserId(decoded?.userId || null);
+      setMessage('');
+      setEmail('');
+      setPassword('');
+      setUsername('');
+      setEditUsername('');
+      setWhatsappNumber('');
+      setProfilePicture('');
+      setPoints(0);
       setIsLogin(true);
       loadProfile();
       if (isVerified) {
+        socket.auth = { token };
+        socket.connect();
         loadFollows();
         loadFeed();
         loadMyMedias();
@@ -623,6 +766,9 @@ export default function Profile() {
         loadDiskUsage();
       }
     }
+    return () => {
+      socket.disconnect();
+    };
   }, [token, loadProfile, loadFollows, loadFeed, loadMyMedias, loadUsers, loadDiskUsage, isVerified]);
 
   return (
@@ -1098,26 +1244,29 @@ export default function Profile() {
                         <video
                           src={`${API_URL}/uploads/${media.filename}`}
                           controls
+                          loop
                           className="img-fluid rounded"
                           style={{ maxHeight: '300px' }}
                         />
                       )}
                       <p className="card-text mt-2">{media.originalname}</p>
-                      <div className="d-flex justify-content-between">
+                      <div className="d-flex justify-content-between mb-2">
                         <div>
                           <button
-                            className="btn btn-sm btn-outline-primary me-2"
-                            disabled
-                            aria-label={`Likes: ${media.likesCount}`}
+                            className={`btn btn-sm ${media.likes.includes(userId) ? 'btn-primary' : 'btn-outline-primary'} me-2`}
+                            onClick={() => likeMedia(media._id)}
+                            disabled={loading || media.dislikes.includes(userId)}
+                            aria-label={`Liker le média ${media.originalname}`}
                           >
-                            👍 {media.likesCount}
+                            <FaThumbsUp className="me-1" /> {media.likes.length}
                           </button>
                           <button
-                            className="btn btn-sm btn-outline-danger"
-                            disabled
-                            aria-label={`Dislikes: ${media.dislikesCount}`}
+                            className={`btn btn-sm ${media.dislikes.includes(userId) ? 'btn-danger' : 'btn-outline-danger'}`}
+                            onClick={() => dislikeMedia(media._id)}
+                            disabled={loading || media.likes.includes(userId)}
+                            aria-label={`Ne pas liker le média ${media.originalname}`}
                           >
-                            👎 {media.dislikesCount}
+                            <FaThumbsDown className="me-1" /> {media.dislikes.length}
                           </button>
                         </div>
                         {media.owner?.whatsappNumber && (
@@ -1133,6 +1282,40 @@ export default function Profile() {
                             <FaWhatsapp className="me-1" /> Partager
                           </a>
                         )}
+                      </div>
+                      <div className="mb-3">
+                        <h6>Commentaires</h6>
+                        {media.comments.length === 0 ? (
+                          <p>Aucun commentaire.</p>
+                        ) : (
+                          <ul className="list-group mb-2">
+                            {media.comments.map((comment) => (
+                              <li key={comment._id} className="list-group-item">
+                                <strong>{comment.author.username || comment.author.email}</strong>: {comment.content}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div className="input-group">
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder="Ajouter un commentaire"
+                            value={commentText[media._id] || ''}
+                            onChange={(e) =>
+                              setCommentText((prev) => ({ ...prev, [media._id]: e.target.value }))
+                            }
+                            aria-label={`Commenter le média ${media.originalname}`}
+                          />
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => addComment(media._id)}
+                            disabled={loading}
+                            aria-label="Envoyer le commentaire"
+                          >
+                            <FaPaperPlane />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
