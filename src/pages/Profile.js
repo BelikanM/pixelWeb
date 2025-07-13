@@ -37,7 +37,14 @@ export default function Profile() {
   const [activeTab, setActiveTab] = useState('profile');
   const [profilePicture, setProfilePicture] = useState('');
   const [selectedProfilePicture, setSelectedProfilePicture] = useState(null);
-  const [diskUsage, setDiskUsage] = useState({ used: 0, total: 5 * 1024 * 1024 * 1024, remaining: 0 }); // 5GB en octets
+  const [diskUsage, setDiskUsage] = useState({ used: 0, total: 5 * 1024 * 1024 * 1024, remaining: 0 });
+  const [points, setPoints] = useState(0); // Solde de points
+  const [youtubeUrl, setYoutubeUrl] = useState(''); // URL YouTube
+  const [youtubeOptions, setYoutubeOptions] = useState({
+    autoplay: false,
+    muted: false,
+    subtitles: false,
+  }); // Options de lecture YouTube
 
   // Charger profil utilisateur
   const loadProfile = useCallback(async () => {
@@ -54,7 +61,8 @@ export default function Profile() {
         setEditUsername(data.username || '');
         setWhatsappNumber(data.whatsappNumber || '');
         setIsVerified(data.isVerified || false);
-        setProfilePicture(data.profilePicture || ''); // URL complète ou vide
+        setProfilePicture(data.profilePicture || '');
+        setPoints(data.points || 0); // Charger les points
       } else {
         setMessage(data.message || 'Erreur chargement profil');
         if (res.status === 401 || res.status === 403) {
@@ -83,7 +91,7 @@ export default function Profile() {
       if (res.ok) {
         setDiskUsage({
           used: data.used,
-          total: 5 * 1024 * 1024 * 1024, // 5GB
+          total: 5 * 1024 * 1024 * 1024,
           remaining: 5 * 1024 * 1024 * 1024 - data.used,
         });
       } else {
@@ -283,7 +291,7 @@ export default function Profile() {
         setMessage(data.message);
         loadMyMedias();
         loadFeed();
-        loadDiskUsage(); // Mettre à jour l'utilisation du disque après suppression
+        loadDiskUsage();
       } else {
         setMessage(data.message || 'Erreur suppression');
       }
@@ -374,7 +382,7 @@ export default function Profile() {
 
       const res = await fetch(`${API_URL}/profile`, {
         method: 'PUT',
-        headers: { Authorization: token }, // Correction : utiliser le token
+        headers: { Authorization: token },
         body: formData,
       });
       const data = await res.json();
@@ -384,11 +392,11 @@ export default function Profile() {
         setEditUsername(data.user.username);
         setWhatsappNumber(data.user.whatsappNumber || '');
         setIsVerified(data.user.isVerified);
-        // Construire l'URL complète si nécessaire
         setProfilePicture(data.user.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
         setSelectedProfilePicture(null);
-        loadProfile(); // Recharger le profil pour garantir la synchronisation
-        loadDiskUsage(); // Mettre à jour l'utilisation du disque
+        setPoints(data.user.points || 0); // Mettre à jour les points
+        loadProfile();
+        loadDiskUsage();
       } else {
         setMessage(data.message || 'Erreur mise à jour profil');
         if (res.status === 401 || res.status === 403) {
@@ -405,7 +413,7 @@ export default function Profile() {
     }
   }, [token, editUsername, whatsappNumber, selectedProfilePicture, isVerified, loadProfile, loadDiskUsage]);
 
-  // Upload média
+  // Upload média ou URL YouTube
   const handleUpload = useCallback(
     async (e) => {
       e.preventDefault();
@@ -413,14 +421,27 @@ export default function Profile() {
         setMessage('Veuillez vérifier votre email avant d’uploader des fichiers');
         return;
       }
-      if (!file) {
-        setMessage('Choisis un fichier');
+      if (!file && !youtubeUrl) {
+        setMessage('Veuillez choisir un fichier ou entrer une URL YouTube');
         return;
       }
-      const formData = new FormData();
-      formData.append('media', file);
+      if (youtubeUrl) {
+        // Validation de l'URL YouTube
+        const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+        if (!youtubeRegex.test(youtubeUrl)) {
+          setMessage('URL YouTube invalide');
+          return;
+        }
+      }
       setLoading(true);
       try {
+        const formData = new FormData();
+        if (file) {
+          formData.append('media', file);
+        } else if (youtubeUrl) {
+          formData.append('youtubeUrl', youtubeUrl);
+          formData.append('youtubeOptions', JSON.stringify(youtubeOptions));
+        }
         const res = await fetch(`${API_URL}/upload`, {
           method: 'POST',
           headers: { Authorization: token },
@@ -430,9 +451,11 @@ export default function Profile() {
         if (res.ok) {
           setMessage(data.message);
           setFile(null);
+          setYoutubeUrl('');
+          setYoutubeOptions({ autoplay: false, muted: false, subtitles: false });
           loadFeed();
           loadMyMedias();
-          loadDiskUsage(); // Mettre à jour l'utilisation du disque après upload
+          loadDiskUsage();
         } else {
           setMessage(data.message || 'Erreur upload');
         }
@@ -442,7 +465,7 @@ export default function Profile() {
         setLoading(false);
       }
     },
-    [token, file, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
+    [token, file, youtubeUrl, youtubeOptions, loadFeed, loadMyMedias, loadDiskUsage, isVerified]
   );
 
   // Recherche utilisateurs
@@ -498,6 +521,7 @@ export default function Profile() {
           setWhatsappNumber(data.user?.whatsappNumber || '');
           setIsVerified(data.user?.isVerified || false);
           setProfilePicture(data.user?.profilePicture ? `${API_URL}/uploads/profiles/${data.user.profilePicture}` : '');
+          setPoints(data.user.points || 0); // Initialiser les points
           setMessage('Connecté avec succès !');
         } else {
           setMessage('Inscription réussie. Vérifiez votre email pour activer votre compte.');
@@ -507,6 +531,7 @@ export default function Profile() {
           setEditUsername('');
           setWhatsappNumber('');
           setProfilePicture('');
+          setPoints(0);
         }
       } catch (err) {
         setMessage(`Erreur : ${err.message}`);
@@ -534,6 +559,7 @@ export default function Profile() {
     setVerificationCode('');
     setProfilePicture('');
     setDiskUsage({ used: 0, total: 5 * 1024 * 1024 * 1024, remaining: 0 });
+    setPoints(0);
     setMessage('Déconnecté');
   }, []);
 
@@ -542,8 +568,6 @@ export default function Profile() {
     const file = e.target.files[0];
     if (file) {
       setSelectedProfilePicture(file);
-      // Ne pas définir profilePicture ici pour éviter l'aperçu local non persistant
-      // setProfilePicture(URL.createObjectURL(file));
     }
   };
 
@@ -571,6 +595,7 @@ export default function Profile() {
       setEditUsername('');
       setWhatsappNumber('');
       setProfilePicture('');
+      setPoints(0);
       setIsLogin(true);
       loadProfile();
       if (isVerified) {
@@ -687,7 +712,7 @@ export default function Profile() {
               ) : (
                 <FaUser className="me-2" />
               )}
-              Bonjour, {username || email || 'Utilisateur'}
+              Bonjour, {username || email || 'Utilisateur'} (Points: {points} FCFA)
             </h3>
             <button
               className="btn btn-outline-danger"
@@ -874,7 +899,7 @@ export default function Profile() {
 
           {activeTab === 'upload' && isVerified && (
             <div className="card p-4 bg-light text-dark rounded shadow-sm">
-              <h4>Uploader un média</h4>
+              <h4>Uploader un média ou une vidéo YouTube</h4>
               <form onSubmit={handleUpload}>
                 <div className="mb-3">
                   <label htmlFor="file" className="form-label">Choisir un fichier (image/vidéo)</label>
@@ -883,15 +908,71 @@ export default function Profile() {
                     id="file"
                     className="form-control"
                     accept="image/*,video/*"
-                    onChange={(e) => setFile(e.target.files[0])}
+                    onChange={(e) => {
+                      setFile(e.target.files[0]);
+                      setYoutubeUrl(''); // Réinitialiser l'URL YouTube si fichier sélectionné
+                    }}
                     aria-label="Choisir un fichier"
                   />
                 </div>
+                <div className="mb-3">
+                  <label htmlFor="youtubeUrl" className="form-label">Ou coller une URL YouTube</label>
+                  <input
+                    type="text"
+                    id="youtubeUrl"
+                    className="form-control"
+                    placeholder="Ex: https://www.youtube.com/watch?v=..."
+                    value={youtubeUrl}
+                    onChange={(e) => {
+                      setYoutubeUrl(e.target.value);
+                      setFile(null); // Réinitialiser le fichier si URL YouTube saisie
+                    }}
+                    aria-label="URL YouTube"
+                  />
+                </div>
+                {youtubeUrl && (
+                  <div className="mb-3">
+                    <h5>Options de lecture YouTube</h5>
+                    <div className="form-check">
+                      <input
+                        type="checkbox"
+                        id="autoplay"
+                        className="form-check-input"
+                        checked={youtubeOptions.autoplay}
+                        onChange={(e) => setYoutubeOptions({ ...youtubeOptions, autoplay: e.target.checked })}
+                        aria-label="Lecture automatique"
+                      />
+                      <label htmlFor="autoplay" className="form-check-label">Lecture automatique</label>
+                    </div>
+                    <div className="form-check">
+                      <input
+                        type="checkbox"
+                        id="muted"
+                        className="form-check-input"
+                        checked={youtubeOptions.muted}
+                        onChange={(e) => setYoutubeOptions({ ...youtubeOptions, muted: e.target.checked })}
+                        aria-label="Son désactivé"
+                      />
+                      <label htmlFor="muted" className="form-check-label">Son désactivé</label>
+                    </div>
+                    <div className="form-check">
+                      <input
+                        type="checkbox"
+                        id="subtitles"
+                        className="form-check-input"
+                        checked={youtubeOptions.subtitles}
+                        onChange={(e) => setYoutubeOptions({ ...youtubeOptions, subtitles: e.target.checked })}
+                        aria-label="Sous-titres"
+                      />
+                      <label htmlFor="subtitles" className="form-check-label">Sous-titres</label>
+                    </div>
+                  </div>
+                )}
                 <button
                   className="btn btn-primary w-100"
                   type="submit"
                   disabled={loading}
-                  aria-label="Uploader le fichier"
+                  aria-label="Uploader le fichier ou l’URL YouTube"
                 >
                   {loading ? (
                     <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
@@ -966,7 +1047,17 @@ export default function Profile() {
                         )}
                         <h5 className="card-title mb-0">{media.owner?.username || media.owner?.email}</h5>
                       </div>
-                      {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                      {media.youtubeUrl ? (
+                        <div className="ratio ratio-16x9">
+                          <iframe
+                            src={`${media.youtubeUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}`}
+                            title={media.originalname}
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                          ></iframe>
+                        </div>
+                      ) : media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
                         <img
                           src={`${API_URL}/uploads/${media.filename}`}
                           alt={media.originalname}
@@ -1059,7 +1150,18 @@ export default function Profile() {
                         </div>
                       ) : (
                         <>
-                          {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                          {media.youtubeUrl ? (
+                            <div className="ratio ratio-16x9 me-3">
+                              <iframe
+                                src={`${media.youtubeUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}`}
+                                title={media.originalname}
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                                style={{ width: '100px', height: '100px' }}
+                              ></iframe>
+                            </div>
+                          ) : media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
                             <img
                               src={`${API_URL}/uploads/${media.filename}`}
                               alt={media.originalname}
@@ -1121,6 +1223,10 @@ export default function Profile() {
                     {((diskUsage.used / diskUsage.total) * 100).toFixed(2)}%
                   </div>
                 </div>
+              </div>
+              <div className="mb-3">
+                <h5>Solde de points</h5>
+                <p>Points : {points} FCFA</p>
               </div>
               <button
                 className="btn btn-primary"

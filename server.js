@@ -31,6 +31,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
     res.set('Cache-Control', 'public, max-age=3600');
   }
 }));
+app.use('/uploads/profiles', express.static(path.join(__dirname, 'Uploads', 'profiles')));
 
 // Configuration des clés VAPID
 webPush.setVapidDetails(
@@ -60,17 +61,25 @@ const userSchema = new mongoose.Schema({
   verificationCodeExpires: { type: Date },
   pushSubscription: { type: Object },
   profilePicture: { type: String, default: '' },
+  points: { type: Number, default: 100 }, // Points initiaux à l'inscription
 });
 const User = mongoose.model('User', userSchema);
 
 // Schéma média
 const mediaSchema = new mongoose.Schema({
-  filename: String,
-  originalname: String,
+  filename: { type: String, required: false },
+  youtubeUrl: { type: String, required: false },
+  youtubeOptions: {
+    autoplay: { type: Boolean, default: false },
+    muted: { type: Boolean, default: true },
+    subtitles: { type: Boolean, default: false },
+  },
+  originalname: { type: String, required: true },
   uploadedAt: { type: Date, default: Date.now },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   dislikes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  views: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   comments: [
     {
       content: { type: String, required: false },
@@ -118,9 +127,9 @@ const storage = multer.diskStorage({
     cb(null, unique + '-' + file.originalname);
   },
 });
-const upload = multer({ 
+const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // Limite de 100MB
+  limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const fileTypes = /jpeg|jpg|png|gif|mp4|mov|avi/;
     const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());
@@ -151,7 +160,7 @@ const profileStorage = multer.diskStorage({
 });
 const uploadProfile = multer({
   storage: profileStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // Limite de 5MB pour la photo de profil
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const fileTypes = /jpeg|jpg|png/;
     const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());
@@ -218,13 +227,14 @@ app.get('/media/:id', async (req, res) => {
       `);
     }
 
-    const mediaUrl = `${req.protocol}://${req.get('host')}/uploads/${media.filename}`;
+    const isYouTube = !!media.youtubeUrl;
+    const mediaUrl = isYouTube ? media.youtubeUrl : `${req.protocol}://${req.get('host')}/uploads/${media.filename}`;
     const pageUrl = `${req.protocol}://${req.get('host')}/media/${media._id}`;
     const title = media.originalname || 'Média sur Pixels Media';
     const description = media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !';
-    const isImage = media.filename.match(/\.(jpg|jpeg|png|gif)$/i);
-    const ogType = isImage ? 'image' : 'video';
-    const twitterCard = isImage ? 'summary_large_image' : 'player';
+    const isImage = !isYouTube && media.filename?.match(/\.(jpg|jpeg|png|gif)$/i);
+    const ogType = isYouTube ? 'video' : isImage ? 'image' : 'video';
+    const twitterCard = isYouTube ? 'player' : isImage ? 'summary_large_image' : 'player';
 
     res.send(`
       <!DOCTYPE html>
@@ -238,12 +248,24 @@ app.get('/media/:id', async (req, res) => {
         <meta property="og:url" content="${pageUrl}">
         <meta property="og:type" content="${ogType}">
         <meta property="og:site_name" content="Pixels Media">
-        ${isImage ? `<meta property="og:image" content="${mediaUrl}">` : `<meta property="og:video" content="${mediaUrl}">`}
-        ${isImage ? `<meta property="og:image:alt" content="${title}">` : `<meta property="og:video:type" content="video/mp4">`}
+        ${isYouTube ? `
+          <meta property="og:video" content="${mediaUrl}">
+          <meta property="og:video:type" content="text/html">
+          <meta name="twitter:player" content="${mediaUrl}">
+          <meta name="twitter:player:width" content="1280">
+          <meta name="twitter:player:height" content="720">
+        ` : isImage ? `
+          <meta property="og:image" content="${mediaUrl}">
+          <meta property="og:image:alt" content="${title}">
+          <meta name="twitter:image" content="${mediaUrl}">
+        ` : `
+          <meta property="og:video" content="${mediaUrl}">
+          <meta property="og:video:type" content="video/mp4">
+          <meta name="twitter:player" content="${mediaUrl}">
+        `}
         <meta name="twitter:card" content="${twitterCard}">
         <meta name="twitter:title" content="${title}">
         <meta name="twitter:description" content="${description}">
-        ${isImage ? `<meta name="twitter:image" content="${mediaUrl}">` : `<meta name="twitter:player" content="${mediaUrl}">`}
         <style>
           body {
             font-family: Arial, sans-serif;
@@ -267,6 +289,10 @@ app.get('/media/:id', async (req, res) => {
             height: auto;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          }
+          .youtube-iframe {
+            width: 100%;
+            aspect-ratio: 16/9;
           }
           h1 {
             font-size: 24px;
@@ -298,13 +324,22 @@ app.get('/media/:id', async (req, res) => {
         <div class="media-container">
           <h1>${title}</h1>
           <p>Par : ${media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}</p>
-          ${isImage 
-            ? `<img src="${mediaUrl}" alt="${title}" class="media-content">`
-            : `<video src="${mediaUrl}" controls autoplay muted class="media-content">
-                 <source src="${mediaUrl}" type="video/mp4">
-                 Votre navigateur ne prend pas en charge la lecture de vidéos.
-               </video>`
-          }
+          ${isYouTube ? `
+            <iframe 
+              src="${mediaUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}" 
+              class="youtube-iframe media-content" 
+              frameborder="0" 
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+              allowfullscreen>
+            </iframe>
+          ` : isImage ? `
+            <img src="${mediaUrl}" alt="${title}" class="media-content">
+          ` : `
+            <video src="${mediaUrl}" controls autoplay muted class="media-content">
+              <source src="${mediaUrl}" type="video/mp4">
+              Votre navigateur ne prend pas en charge la lecture de vidéos.
+            </video>
+          `}
           <p>Redirection vers l'application Pixels Media...</p>
           <p><a href="http://localhost:3000">Retour à l'accueil</a></p>
         </div>
@@ -379,6 +414,7 @@ app.post('/register', async (req, res) => {
     whatsappMessage: whatsappMessage || 'Découvrez ce contenu sur Pixels Media !',
     verificationToken,
     profilePicture: '',
+    points: 100,
   });
 
   const verificationLink = `http://localhost:5000/verify-email?token=${verificationToken}`;
@@ -497,16 +533,17 @@ app.post('/login', async (req, res) => {
   if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
 
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '2h' });
-  res.json({ 
-    token, 
-    user: { 
-      email: user.email, 
-      username: user.username, 
+  res.json({
+    token,
+    user: {
+      email: user.email,
+      username: user.username,
       isVerified: user.isVerified,
       whatsappNumber: user.whatsappNumber,
       whatsappMessage: user.whatsappMessage,
-      profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : ''
-    } 
+      profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : '',
+      points: user.points
+    }
   });
 });
 
@@ -514,7 +551,7 @@ app.post('/login', async (req, res) => {
 app.get('/profile', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
-      .select('email username isVerified whatsappNumber whatsappMessage profilePicture')
+      .select('email username isVerified whatsappNumber whatsappMessage profilePicture points')
       .lean();
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     res.json({
@@ -548,11 +585,10 @@ app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (
     const user = await User.findById(req.user.userId);
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
 
-    // Supprimer l'ancienne photo de profil si une nouvelle est uploadée
     if (req.file && user.profilePicture) {
       try {
         const oldProfilePicturePath = path.join(__dirname, 'Uploads', 'profiles', user.profilePicture);
-        await fs.access(oldProfilePicturePath); // Vérifie si le fichier existe
+        await fs.access(oldProfilePicturePath);
         await fs.unlink(oldProfilePicturePath);
       } catch (err) {
         console.error(`Erreur lors de la suppression de l'ancienne photo de profil ${user.profilePicture}:`, err);
@@ -570,7 +606,12 @@ app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (
       req.user.userId,
       updatedData,
       { new: true, runValidators: true }
-    ).select('email username isVerified whatsappNumber whatsappMessage profilePicture').lean();
+    ).select('email username isVerified whatsappNumber whatsappMessage profilePicture points').lean();
+
+    io.emit('profilePictureUpdate', {
+      userId: req.user.userId,
+      profilePicture: updatedUser.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${updatedUser.profilePicture}` : ''
+    });
 
     res.json({
       message: 'Profil mis à jour',
@@ -587,38 +628,65 @@ app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (
 
 // Upload média
 app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ message: 'Aucun fichier' });
+  const { youtubeUrl, originalname, autoplay, muted, subtitles } = req.body;
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
+    if (!req.file && !youtubeUrl) {
+      return res.status(400).json({ message: 'Aucun fichier ou URL YouTube fourni' });
+    }
+    if (!originalname || !originalname.trim()) {
+      return res.status(400).json({ message: 'Le nom du média est requis' });
+    }
+
+    if (youtubeUrl) {
+      const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=|embed\/|v\/|.+\?v=)?([^&=%\?]{11})/;
+      if (!youtubeRegex.test(youtubeUrl)) {
+        return res.status(400).json({ message: 'URL YouTube invalide' });
+      }
+    }
+
     const media = await Media.create({
-      filename: req.file.filename,
-      originalname: req.file.originalname,
+      filename: req.file ? req.file.filename : null,
+      youtubeUrl: youtubeUrl || null,
+      youtubeOptions: youtubeUrl ? {
+        autoplay: autoplay === 'true',
+        muted: muted === 'true',
+        subtitles: subtitles === 'true'
+      } : null,
+      originalname: originalname.trim(),
       owner: req.user.userId,
       likes: [],
       dislikes: [],
+      views: [],
       comments: [],
     });
+
     const populatedMedia = await Media.findById(media._id)
       .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
       .lean();
-    res.status(201).json({ message: 'Fichier uploadé', media: {
-      ...populatedMedia,
-      owner: {
-        ...populatedMedia.owner,
-        profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
-      }
-    } });
-    io.to(user._id.toString()).emit('newMedia', { 
+
+    res.status(201).json({
+      message: 'Fichier ou URL YouTube uploadé',
       media: {
         ...populatedMedia,
         owner: {
           ...populatedMedia.owner,
           profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
         }
-      }, 
-      owner: user 
+      }
+    });
+
+    io.to(user._id.toString()).emit('newMedia', {
+      media: {
+        ...populatedMedia,
+        owner: {
+          ...populatedMedia.owner,
+          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
+        }
+      },
+      owner: user
     });
   } catch (error) {
     console.error('Erreur /upload:', error);
@@ -631,17 +699,21 @@ app.get('/feed', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).lean();
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+
     const medias = await Media.find({ owner: { $in: user.following || [] } })
       .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
       .populate('comments.author', 'username profilePicture')
       .sort({ uploadedAt: -1 })
       .lean();
+
     const mediasWithLikes = medias.map(media => ({
       ...media,
-      likesCount: media.likes.length,
-      dislikesCount: media.dislikes.length,
-      isLiked: media.likes.some(id => id.toString() === req.user.userId),
-      isDisliked: media.dislikes.some(id => id.toString() === req.user.userId),
+      likesCount: Array.isArray(media.likes) ? media.likes.length : 0,
+      dislikesCount: Array.isArray(media.dislikes) ? media.dislikes.length : 0,
+      viewsCount: Array.isArray(media.views) ? media.views.length : 0,
+      isLiked: Array.isArray(media.likes) && media.likes.some(id => id.toString() === req.user.userId),
+      isDisliked: Array.isArray(media.dislikes) && media.dislikes.some(id => id.toString() === req.user.userId),
       owner: {
         ...media.owner,
         profilePicture: media.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${media.owner.profilePicture}` : ''
@@ -654,6 +726,7 @@ app.get('/feed', verifyToken, async (req, res) => {
         }
       }))
     }));
+
     res.json(mediasWithLikes || []);
   } catch (error) {
     console.error('Erreur /feed:', error);
@@ -671,7 +744,7 @@ app.get('/users', verifyToken, async (req, res) => {
         { username: { $regex: q, $options: 'i' } },
       ],
       _id: { $ne: req.user.userId },
-    }).select('email username whatsappNumber whatsappMessage profilePicture').lean();
+    }).select('email username whatsappNumber whatsappMessage profilePicture points').lean();
     res.json(users.map(user => ({
       ...user,
       profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : ''
@@ -686,7 +759,7 @@ app.get('/users', verifyToken, async (req, res) => {
 app.get('/follows', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
-      .populate('following', 'email username whatsappNumber whatsappMessage profilePicture')
+      .populate('following', 'email username whatsappNumber whatsappMessage profilePicture points')
       .lean();
     res.json(user.following.map(follow => ({
       ...follow,
@@ -704,10 +777,18 @@ app.post('/follow', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (user.points < 50) return res.status(403).json({ message: 'Solde insuffisant (50 FCFA requis)' });
 
-    await User.findByIdAndUpdate(req.user.userId, { $addToSet: { following: followingId } });
-    res.json({ message: 'Abonnement effectué' });
-    io.to(req.user.userId).emit('followUpdate', { userId: req.user.userId, followingId });
+    if (user.following.includes(followingId)) {
+      return res.status(400).json({ message: 'Déjà abonné à cet utilisateur' });
+    }
+
+    user.following.push(followingId);
+    user.points -= 50;
+    await user.save();
+
+    res.json({ message: 'Abonnement effectué', points: user.points });
+    io.to(req.user.userId).emit('followUpdate', { userId: req.user.userId, followingId, points: user.points });
   } catch (error) {
     console.error('Erreur /follow:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -718,7 +799,12 @@ app.post('/follow', verifyToken, async (req, res) => {
 app.delete('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
-    await User.findByIdAndUpdate(req.user.userId, { $pull: { following: followingId } });
+    const user = await User.findById(req.user.userId);
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+
+    user.following = user.following.filter(id => id.toString() !== followingId);
+    await user.save();
+
     res.json({ message: 'Désabonnement effectué' });
     io.to(req.user.userId).emit('unfollowUpdate', { userId: req.user.userId, unfollowedId: followingId });
   } catch (error) {
@@ -732,9 +818,12 @@ app.get('/my-medias', verifyToken, async (req, res) => {
   try {
     const list = await Media.find({ owner: req.user.userId })
       .sort({ uploadedAt: -1 })
-      .select('-likes -dislikes -comments')
       .lean();
-    res.json(list || []);
+    res.json(list.map(media => ({
+      ...media,
+      filename: media.filename ? `${req.protocol}://${req.get('host')}/uploads/${media.filename}` : null,
+      youtubeUrl: media.youtubeUrl || null
+    })) || []);
   } catch (error) {
     console.error('Erreur /my-medias:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -747,18 +836,44 @@ app.put('/media/:id', verifyToken, async (req, res) => {
     const media = await Media.findById(req.params.id);
     if (!media || media.owner.toString() !== req.user.userId)
       return res.status(403).json({ message: 'Non autorisé' });
-    media.originalname = req.body.originalname;
+
+    const { originalname, youtubeUrl, autoplay, muted, subtitles } = req.body;
+    if (!originalname || !originalname.trim()) {
+      return res.status(400).json({ message: 'Le nom du média est requis' });
+    }
+
+    if (youtubeUrl) {
+      const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=|embed\/|v\/|.+\?v=)?([^&=%\?]{11})/;
+      if (!youtubeRegex.test(youtubeUrl)) {
+        return res.status(400).json({ message: 'URL YouTube invalide' });
+      }
+    }
+
+    media.originalname = originalname.trim();
+    if (youtubeUrl) {
+      media.youtubeUrl = youtubeUrl;
+      media.youtubeOptions = {
+        autoplay: autoplay === 'true',
+        muted: muted === 'true',
+        subtitles: subtitles === 'true'
+      };
+    }
+
     await media.save();
     const populatedMedia = await Media.findById(req.params.id)
       .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
       .lean();
-    res.json({ message: 'Nom mis à jour', media: {
-      ...populatedMedia,
-      owner: {
-        ...populatedMedia.owner,
-        profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
+
+    res.json({
+      message: 'Nom mis à jour',
+      media: {
+        ...populatedMedia,
+        owner: {
+          ...populatedMedia.owner,
+          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
+        }
       }
-    } });
+    });
   } catch (error) {
     console.error('Erreur /media/:id PUT:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -771,12 +886,16 @@ app.delete('/media/:id', verifyToken, async (req, res) => {
     const media = await Media.findById(req.params.id);
     if (!media || media.owner.toString() !== req.user.userId)
       return res.status(403).json({ message: 'Non autorisé' });
-    await media.deleteOne();
-    try {
-      await fs.unlink(path.join(__dirname, 'Uploads', media.filename));
-    } catch (err) {
-      console.error(`Erreur lors de la suppression du fichier ${media.filename}:`, err);
+
+    if (media.filename) {
+      try {
+        await fs.unlink(path.join(__dirname, 'Uploads', media.filename));
+      } catch (err) {
+        console.error(`Erreur lors de la suppression du fichier ${media.filename}:`, err);
+      }
     }
+
+    await media.deleteOne();
     res.json({ message: 'Fichier supprimé' });
     io.emit('mediaDeleted', { mediaId: req.params.id });
   } catch (error) {
@@ -790,6 +909,7 @@ app.post('/like/:mediaId', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (user.points < 10) return res.status(403).json({ message: 'Solde insuffisant (10 FCFA requis)' });
 
     const media = await Media.findById(req.params.mediaId);
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
@@ -800,13 +920,16 @@ app.post('/like/:mediaId', verifyToken, async (req, res) => {
 
     media.likes.push(req.user.userId);
     media.dislikes = media.dislikes.filter(userId => userId.toString() !== req.user.userId);
-    await media.save();
-    res.json({ message: 'Média aimé', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('likeUpdate', { 
-      mediaId: req.params.mediaId, 
-      likesCount: media.likes.length, 
-      dislikesCount: media.dislikes.length, 
-      userId: req.user.userId 
+    user.points -= 10;
+    await Promise.all([media.save(), user.save()]);
+
+    res.json({ message: 'Média aimé', likesCount: media.likes.length, dislikesCount: media.dislikes.length, points: user.points });
+    io.emit('likeUpdate', {
+      mediaId: req.params.mediaId,
+      likesCount: media.likes.length,
+      dislikesCount: media.dislikes.length,
+      userId: req.user.userId,
+      points: user.points
     });
   } catch (error) {
     console.error('Erreur /like/:mediaId POST:', error);
@@ -826,12 +949,13 @@ app.delete('/like/:mediaId', verifyToken, async (req, res) => {
 
     media.likes = media.likes.filter(userId => userId.toString() !== req.user.userId);
     await media.save();
+
     res.json({ message: 'Like retiré', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('unlikeUpdate', { 
-      mediaId: req.params.mediaId, 
-      likesCount: media.likes.length, 
-      dislikesCount: media.dislikes.length, 
-      userId: req.user.userId 
+    io.emit('unlikeUpdate', {
+      mediaId: req.params.mediaId,
+      likesCount: media.likes.length,
+      dislikesCount: media.dislikes.length,
+      userId: req.user.userId
     });
   } catch (error) {
     console.error('Erreur /like/:mediaId DELETE:', error);
@@ -855,12 +979,13 @@ app.post('/dislike/:mediaId', verifyToken, async (req, res) => {
     media.dislikes.push(req.user.userId);
     media.likes = media.likes.filter(userId => userId.toString() !== req.user.userId);
     await media.save();
+
     res.json({ message: 'Média marqué comme non apprécié', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('dislikeUpdate', { 
-      mediaId: req.params.mediaId, 
-      likesCount: media.likes.length, 
-      dislikesCount: media.dislikes.length, 
-      userId: req.user.userId 
+    io.emit('dislikeUpdate', {
+      mediaId: req.params.mediaId,
+      likesCount: media.likes.length,
+      dislikesCount: media.dislikes.length,
+      userId: req.user.userId
     });
   } catch (error) {
     console.error('Erreur /dislike/:mediaId POST:', error);
@@ -880,12 +1005,13 @@ app.delete('/dislike/:mediaId', verifyToken, async (req, res) => {
 
     media.dislikes = media.dislikes.filter(userId => userId.toString() !== req.user.userId);
     await media.save();
+
     res.json({ message: 'Dislike retiré', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
-    io.emit('undislikeUpdate', { 
-      mediaId: req.params.mediaId, 
-      likesCount: media.likes.length, 
-      dislikesCount: media.dislikes.length, 
-      userId: req.user.userId 
+    io.emit('undislikeUpdate', {
+      mediaId: req.params.mediaId,
+      likesCount: media.likes.length,
+      dislikesCount: media.dislikes.length,
+      userId: req.user.userId
     });
   } catch (error) {
     console.error('Erreur /dislike/:mediaId DELETE:', error);
@@ -898,6 +1024,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (user.points < 25) return res.status(403).json({ message: 'Solde insuffisant (25 FCFA requis)' });
 
     const media = await Media.findById(req.params.mediaId)
       .populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription profilePicture');
@@ -924,7 +1051,8 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
       createdAt: new Date(),
     };
     media.comments.push(newComment);
-    await media.save();
+    user.points -= 25;
+    await Promise.all([media.save(), user.save()]);
 
     if (media.owner._id.toString() !== req.user.userId) {
       const mailOptions = {
@@ -966,18 +1094,26 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
     const updatedMedia = await Media.findById(req.params.mediaId)
       .populate('comments.author', 'username profilePicture')
       .lean();
-    res.json({ message: 'Commentaire ajouté', comments: updatedMedia.comments.map(comment => ({
-      ...comment,
-      author: {
-        ...comment.author,
-        profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
-      }
-    })) });
+    res.json({
+      message: 'Commentaire ajouté',
+      points: user.points,
+      comments: updatedMedia.comments.map(comment => ({
+        ...comment,
+        author: {
+          ...comment.author,
+          profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
+        }
+      }))
+    });
     io.emit('commentUpdate', {
       mediaId: req.params.mediaId,
       comment: {
         ...newComment,
-        author: { _id: req.user.userId, username: user.username, profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : '' },
+        author: {
+          _id: req.user.userId,
+          username: user.username,
+          profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : ''
+        },
       },
     });
   } catch (error) {
@@ -1007,7 +1143,6 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
       return res.status(400).json({ message: 'Le commentaire ou le média ne peut pas être vide' });
     }
 
-    // Supprimer l'ancienne média du commentaire si une nouvelle est uploadée
     if (req.file && comment.media) {
       try {
         await fs.unlink(path.join(__dirname, 'Uploads', comment.media));
@@ -1061,20 +1196,27 @@ app.put('/comment/:mediaId/:commentId', verifyToken, upload.single('media'), asy
     const updatedMedia = await Media.findById(req.params.mediaId)
       .populate('comments.author', 'username profilePicture')
       .lean();
-    res.json({ message: 'Commentaire modifié', comments: updatedMedia.comments.map(comment => ({
-      ...comment,
-      author: {
-        ...comment.author,
-        profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
-      }
-    })) });
+    res.json({
+      message: 'Commentaire modifié',
+      comments: updatedMedia.comments.map(comment => ({
+        ...comment,
+        author: {
+          ...comment.author,
+          profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
+        }
+      }))
+    });
     io.emit('commentUpdate', {
       mediaId: req.params.mediaId,
       comment: {
         _id: req.params.commentId,
         content: content ? content.trim() : '',
         media: req.file ? req.file.filename : comment.media,
-        author: { _id: req.user.userId, username: user.username, profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : '' },
+        author: {
+          _id: req.user.userId,
+          username: user.username,
+          profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : ''
+        },
         createdAt: new Date(),
       },
     });
@@ -1155,6 +1297,34 @@ app.delete('/comment/:mediaId/:commentId', verifyToken, async (req, res) => {
   }
 });
 
+// Enregistrer une vue
+app.post('/view/:mediaId', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+
+    const media = await Media.findById(req.params.mediaId);
+    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
+
+    if (media.views.includes(req.user.userId)) {
+      return res.status(400).json({ message: 'Vue déjà enregistrée pour ce média' });
+    }
+
+    media.views.push(req.user.userId);
+    user.points += 10;
+    await Promise.all([media.save(), user.save()]);
+
+    res.json({ message: 'Vue enregistrée', points: user.points });
+    io.to(req.user.userId).emit('viewUpdate', {
+      mediaId: req.params.mediaId,
+      points: user.points
+    });
+  } catch (error) {
+    console.error('Erreur /view/:mediaId POST:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
 // Route pour récupérer l'utilisation de l'espace disque
 app.get('/disk-usage', verifyToken, async (req, res) => {
   try {
@@ -1166,20 +1336,22 @@ app.get('/disk-usage', verifyToken, async (req, res) => {
     let totalSize = 0;
 
     for (const media of medias) {
-      try {
-        const filePath = path.join(__dirname, 'Uploads', media.filename);
-        await fs.access(filePath); // Vérifie si le fichier existe
-        const stats = await fs.stat(filePath);
-        totalSize += stats.size;
-      } catch (err) {
-        console.error(`Erreur lors de la lecture du fichier ${media.filename}:`, err);
+      if (media.filename) {
+        try {
+          const filePath = path.join(__dirname, 'Uploads', media.filename);
+          await fs.access(filePath);
+          const stats = await fs.stat(filePath);
+          totalSize += stats.size;
+        } catch (err) {
+          console.error(`Erreur lors de la lecture du fichier ${media.filename}:`, err);
+        }
       }
     }
 
     if (user.profilePicture) {
       try {
         const profilePicturePath = path.join(__dirname, 'Uploads', 'profiles', user.profilePicture);
-        await fs.access(profilePicturePath); // Vérifie si le fichier existe
+        await fs.access(profilePicturePath);
         const stats = await fs.stat(profilePicturePath);
         totalSize += stats.size;
       } catch (err) {

@@ -33,7 +33,9 @@ export default function Home() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(null);
+  const [points, setPoints] = useState(0); // Solde de points
   const videoRefs = useRef(new Map());
+  const viewTimers = useRef(new Map()); // Suivi des vues
   const observerRef = useRef(null);
   const navigate = useNavigate();
 
@@ -78,6 +80,7 @@ export default function Home() {
         setUsername(data.username || data.email || 'Utilisateur');
         setIsVerified(data.isVerified || false);
         setProfilePicture(data.profilePicture || '');
+        setPoints(data.points || 0); // Charger les points
       } else {
         setMessage(data.message || 'Erreur chargement profil');
         if (res.status === 401 || res.status === 403) {
@@ -107,6 +110,8 @@ export default function Home() {
             ...media.owner,
             profilePicture: media.owner?.profilePicture || '',
           },
+          isLiked: media.likes.includes(parseJwt(token)?.userId),
+          isDisliked: media.dislikes.includes(parseJwt(token)?.userId),
         })));
         if (data.length === 0) {
           setMessage('Aucun contenu à afficher. Suivez des utilisateurs pour voir leurs médias.');
@@ -147,6 +152,10 @@ export default function Home() {
         setMessage('Veuillez vérifier votre email avant de suivre des utilisateurs');
         return;
       }
+      if (points < 50) {
+        setMessage('Solde insuffisant pour s’abonner (50 FCFA requis)');
+        return;
+      }
       setActionLoading((prev) => ({ ...prev, [`follow-${id}`]: true }));
       try {
         const res = await fetch(`${API_URL}/follow`, {
@@ -157,8 +166,9 @@ export default function Home() {
         const data = await res.json();
         if (res.ok) {
           setMessage(data.message);
+          setPoints(data.points); // Mettre à jour les points
           setFollows((prev) => [...new Set([...prev, id.toString()])]);
-          loadFeed(); // Recharger le feed pour inclure les nouveaux médias
+          loadFeed();
         } else {
           setMessage(data.message || 'Erreur lors de l’abonnement');
         }
@@ -168,7 +178,7 @@ export default function Home() {
         setActionLoading((prev) => ({ ...prev, [`follow-${id}`]: false }));
       }
     },
-    [token, isVerified, loadFeed]
+    [token, isVerified, points, loadFeed]
   );
 
   const unfollowUser = useCallback(
@@ -238,6 +248,10 @@ export default function Home() {
         setMessage('Veuillez vérifier votre email avant d’aimer un média');
         return;
       }
+      if (points < 10) {
+        setMessage('Solde insuffisant pour liker (10 FCFA requis)');
+        return;
+      }
       setActionLoading((prev) => ({ ...prev, [`like-${mediaId}`]: true }));
       try {
         const res = await fetch(`${API_URL}/like/${mediaId}`, {
@@ -247,6 +261,20 @@ export default function Home() {
         const data = await res.json();
         if (res.ok) {
           setMessage(data.message);
+          setPoints(data.points); // Mettre à jour les points
+          setFeed((prev) =>
+            prev.map((media) =>
+              media._id === mediaId
+                ? {
+                    ...media,
+                    likesCount: data.likesCount,
+                    dislikesCount: data.dislikesCount,
+                    isLiked: true,
+                    isDisliked: false,
+                  }
+                : media
+            )
+          );
         } else {
           setMessage(data.message || 'Erreur lors de l’ajout du like');
         }
@@ -256,7 +284,7 @@ export default function Home() {
         setActionLoading((prev) => ({ ...prev, [`like-${mediaId}`]: false }));
       }
     },
-    [token, isVerified]
+    [token, isVerified, points]
   );
 
   const unlikeMedia = useCallback(
@@ -274,6 +302,18 @@ export default function Home() {
         const data = await res.json();
         if (res.ok) {
           setMessage(data.message);
+          setFeed((prev) =>
+            prev.map((media) =>
+              media._id === mediaId
+                ? {
+                    ...media,
+                    likesCount: data.likesCount,
+                    dislikesCount: data.dislikesCount,
+                    isLiked: false,
+                  }
+                : media
+            )
+          );
         } else {
           setMessage(data.message || 'Erreur lors du retrait du like');
         }
@@ -301,6 +341,19 @@ export default function Home() {
         const data = await res.json();
         if (res.ok) {
           setMessage(data.message);
+          setFeed((prev) =>
+            prev.map((media) =>
+              media._id === mediaId
+                ? {
+                    ...media,
+                    likesCount: data.likesCount,
+                    dislikesCount: data.dislikesCount,
+                    isDisliked: true,
+                    isLiked: false,
+                  }
+                : media
+            )
+          );
         } else {
           setMessage(data.message || 'Erreur lors de l’ajout du dislike');
         }
@@ -328,6 +381,18 @@ export default function Home() {
         const data = await res.json();
         if (res.ok) {
           setMessage(data.message);
+          setFeed((prev) =>
+            prev.map((media) =>
+              media._id === mediaId
+                ? {
+                    ...media,
+                    likesCount: data.likesCount,
+                    dislikesCount: data.dislikesCount,
+                    isDisliked: false,
+                  }
+                : media
+            )
+          );
         } else {
           setMessage(data.message || 'Erreur lors du retrait du dislike');
         }
@@ -344,6 +409,10 @@ export default function Home() {
     async (mediaId) => {
       if (!isVerified) {
         setMessage('Veuillez vérifier votre email avant de commenter');
+        return;
+      }
+      if (points < 25) {
+        setMessage('Solde insuffisant pour commenter (25 FCFA requis)');
         return;
       }
       if (submittingComment[mediaId]) {
@@ -369,8 +438,10 @@ export default function Home() {
         const data = await res.json();
         if (res.ok) {
           setMessage(data.message);
+          setPoints(data.points); // Mettre à jour les points
           setCommentInput((prev) => ({ ...prev, [mediaId]: '' }));
           setSelectedMedia((prev) => ({ ...prev, [mediaId]: null }));
+          loadFeed(); // Recharger pour afficher le nouveau commentaire
         } else {
           setMessage(data.message || 'Erreur lors de l’ajout du commentaire');
         }
@@ -380,7 +451,7 @@ export default function Home() {
         setSubmittingComment((prev) => ({ ...prev, [mediaId]: false }));
       }
     },
-    [token, isVerified, commentInput, submittingComment, selectedMedia]
+    [token, isVerified, commentInput, submittingComment, selectedMedia, points, loadFeed]
   );
 
   const editComment = useCallback(
@@ -415,6 +486,7 @@ export default function Home() {
           setCommentInput((prev) => ({ ...prev, [mediaId]: '' }));
           setSelectedMedia((prev) => ({ ...prev, [mediaId]: null }));
           setEditingComment(null);
+          loadFeed(); // Recharger pour afficher le commentaire modifié
         } else {
           setMessage(data.message || 'Erreur lors de la modification du commentaire');
         }
@@ -424,7 +496,7 @@ export default function Home() {
         setSubmittingComment((prev) => ({ ...prev, [mediaId]: false }));
       }
     },
-    [token, isVerified, commentInput, selectedMedia, submittingComment]
+    [token, isVerified, commentInput, selectedMedia, submittingComment, loadFeed]
   );
 
   const deleteComment = useCallback(
@@ -443,6 +515,7 @@ export default function Home() {
         const data = await res.json();
         if (res.ok) {
           setMessage(data.message);
+          loadFeed(); // Recharger pour supprimer le commentaire
         } else {
           setMessage(data.message || 'Erreur lors de la suppression du commentaire');
         }
@@ -452,7 +525,7 @@ export default function Home() {
         setActionLoading((prev) => ({ ...prev, [`delete-comment-${mediaId}-${commentId}`]: false }));
       }
     },
-    [token, isVerified]
+    [token, isVerified, loadFeed]
   );
 
   const addEmoji = (mediaId, emoji) => {
@@ -523,6 +596,39 @@ export default function Home() {
     }
   }, []);
 
+  const handleViewTracking = useCallback((mediaId, isVisible) => {
+    if (!isVerified || !token) return;
+    const userId = parseJwt(token)?.userId;
+    if (!userId) return;
+
+    if (isVisible) {
+      if (!viewTimers.current.has(mediaId)) {
+        viewTimers.current.set(mediaId, setTimeout(async () => {
+          try {
+            const res = await fetch(`${API_URL}/view/${mediaId}`, {
+              method: 'POST',
+              headers: { authorization: token },
+            });
+            const data = await res.json();
+            if (res.ok) {
+              setPoints(data.points); // Mettre à jour les points
+              setMessage('Vue enregistrée (+10 FCFA)');
+            } else {
+              setMessage(data.message || 'Erreur lors de l’enregistrement de la vue');
+            }
+          } catch {
+            setMessage('Erreur réseau lors de l’enregistrement de la vue');
+          }
+        }, 30000)); // 30 secondes
+      }
+    } else {
+      if (viewTimers.current.has(mediaId)) {
+        clearTimeout(viewTimers.current.get(mediaId));
+        viewTimers.current.delete(mediaId);
+      }
+    }
+  }, [token, isVerified]);
+
   useEffect(() => {
     let currentPlayingVideo = null;
 
@@ -541,11 +647,13 @@ export default function Home() {
               setMessage('Impossible de lire la vidéo. Veuillez réessayer.');
             });
             currentPlayingVideo = video;
+            handleViewTracking(mediaId, true);
           } else {
             video.pause();
             if (currentPlayingVideo === video) {
               currentPlayingVideo = null;
             }
+            handleViewTracking(mediaId, false);
           }
         });
       },
@@ -570,11 +678,12 @@ export default function Home() {
         if (video) {
           observer.unobserve(video);
           video.removeEventListener('error', () => {});
+          handleViewTracking(mediaId, false);
         }
       });
       observer.disconnect();
     };
-  }, [feed, isMuted]);
+  }, [feed, isMuted, handleViewTracking]);
 
   useEffect(() => {
     if (token && isVerified) {
@@ -585,9 +694,10 @@ export default function Home() {
         console.log('Connecté à WebSocket');
       });
 
-      socket.on('followUpdate', async ({ userId, followingId }) => {
+      socket.on('followUpdate', async ({ userId, followingId, points }) => {
         if (userId === parseJwt(token)?.userId) {
           setFollows((prev) => [...new Set([...prev, followingId.toString()])]);
+          setPoints(points); // Mettre à jour les points
           await loadFeed();
         }
       });
@@ -612,8 +722,8 @@ export default function Home() {
               },
               likesCount: media.likes.length,
               dislikesCount: media.dislikes.length,
-              isLiked: false,
-              isDisliked: false,
+              isLiked: media.likes.includes(parseJwt(token)?.userId),
+              isDisliked: media.dislikes.includes(parseJwt(token)?.userId),
             },
             ...prev,
           ]);
@@ -644,7 +754,7 @@ export default function Home() {
         videoRefs.current.delete(mediaId);
       });
 
-      socket.on('likeUpdate', ({ mediaId, likesCount, dislikesCount, userId }) => {
+      socket.on('likeUpdate', ({ mediaId, likesCount, dislikesCount, userId, points }) => {
         setFeed((prev) =>
           prev.map((media) =>
             media._id === mediaId
@@ -658,6 +768,9 @@ export default function Home() {
               : media
           )
         );
+        if (userId === parseJwt(token)?.userId) {
+          setPoints(points); // Mettre à jour les points
+        }
       });
 
       socket.on('unlikeUpdate', ({ mediaId, likesCount, dislikesCount, userId }) => {
@@ -750,6 +863,12 @@ export default function Home() {
         );
       });
 
+      socket.on('viewUpdate', ({ mediaId, points }) => {
+        if (parseJwt(token)?.userId) {
+          setPoints(points); // Mettre à jour les points
+        }
+      });
+
       socket.on('connect_error', (err) => {
         console.error('Erreur WebSocket:', err.message);
         setMessage('Erreur de connexion WebSocket');
@@ -768,6 +887,7 @@ export default function Home() {
         socket.off('undislikeUpdate');
         socket.off('commentUpdate');
         socket.off('commentDeleted');
+        socket.off('viewUpdate');
         socket.off('connect_error');
         socket.disconnect();
       };
@@ -795,6 +915,7 @@ export default function Home() {
     setFeed([]);
     setFollows([]);
     setProfilePicture('');
+    setPoints(0); // Réinitialiser les points
     setMessage('Déconnecté');
     socket.disconnect();
     navigate('/profile');
@@ -842,7 +963,20 @@ export default function Home() {
             feed.map((media) => (
               <div key={media._id} className="tiktok-media fade-in">
                 <div className="media-wrapper">
-                  {media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                  {media.youtubeUrl ? (
+                    <Link to={`/media/${media._id}`} className="media-link">
+                      <div className="ratio ratio-16x9">
+                        <iframe
+                          src={`${media.youtubeUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}`}
+                          title={media.originalname}
+                          frameBorder="0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          className="tiktok-media-content"
+                        ></iframe>
+                      </div>
+                    </Link>
+                  ) : media.filename.match(/\.(jpg|jpeg|png|gif)$/i) ? (
                     <Link to={`/media/${media._id}`} className="media-link">
                       <img
                         src={`${API_URL}/uploads/${media.filename}`}
@@ -900,7 +1034,7 @@ export default function Home() {
                           style={{ fontSize: '30px' }}
                         />
                       )}
-                      Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
+                      Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'} (Points: {points} FCFA)
                       {media.owner && media.owner._id.toString() !== parseJwt(token)?.userId && (
                         follows.includes(media.owner?._id.toString()) ? (
                           <button
