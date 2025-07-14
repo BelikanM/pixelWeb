@@ -35,6 +35,11 @@ app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
 }));
 app.use('/uploads/profiles', express.static(path.join(__dirname, 'Uploads', 'profiles')));
 
+// Middleware pour récupérer l'IP du client
+const getClientIp = (req) => {
+  return req.headers['x-forwarded-for']?.split(',')[0] || req.connection.remoteAddress;
+};
+
 // Configuration des clés VAPID pour les notifications push
 if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
   console.error('❌ Clés VAPID non configurées');
@@ -73,6 +78,8 @@ const userSchema = new mongoose.Schema({
     follows: { type: Number, default: 0 },
     lastReset: { type: Date, default: Date.now },
   },
+  blockedUntil: { type: Date, default: null },
+  ipHistory: [{ ip: String, lastAction: Date }],
 });
 const User = mongoose.model('User', userSchema);
 
@@ -96,6 +103,7 @@ const mediaSchema = new mongoose.Schema({
       createdAt: { type: Date, default: Date.now },
     },
   ],
+  points: { type: Number, default: 0 },
 });
 const Media = mongoose.model('Media', mediaSchema);
 
@@ -106,12 +114,26 @@ const actionSchema = new mongoose.Schema({
   actionType: { type: String, enum: ['like', 'view', 'follow'], required: true },
   platform: { type: String, enum: ['youtube', 'tiktok', 'facebook'], required: true },
   token: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now, expires: '1h' }, // Expire après 1 heure
+  createdAt: { type: Date, default: Date.now, expires: '1h' },
   validated: { type: Boolean, default: false },
+  ip: { type: String, required: true },
 });
 const Action = mongoose.model('Action', actionSchema);
 
-// Configuration Nodemailer pour l'envoi d'emails
+// Schéma pour les transactions de points
+const pointsTransactionSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  media: { type: mongoose.Schema.Types.ObjectId, ref: 'Media', required: false },
+  points: { type: Number, required: true },
+  type: { type: String, enum: ['credit', 'debit', 'reset'], required: true },
+  actionType: { type: String, enum: ['like', 'view', 'follow', 'add', 'update', 'reset'], required: true },
+  platform: { type: String, enum: ['youtube', 'tiktok', 'facebook', 'local'], required: false },
+  ip: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+});
+const PointsTransaction = mongoose.model('PointsTransaction', pointsTransactionSchema);
+
+// Configuration Nodemailer
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
@@ -149,7 +171,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
+  limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const fileTypes = /jpeg|jpg|png|gif|mp4|mov|avi/;
     const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());
@@ -180,7 +202,7 @@ const profileStorage = multer.diskStorage({
 });
 const uploadProfile = multer({
   storage: profileStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const fileTypes = /jpeg|jpg|png/;
     const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());
@@ -208,7 +230,43 @@ const resetDailyActions = async (user) => {
   }
 };
 
-// WebSocket : Gestion des connexions avec authentification
+// Vérification anti-fraude
+const checkFraud = async (userId, ip, actionType, mediaId) => {
+  const user = await User.findById(userId);
+  if (user.blockedUntil && user.blockedUntil > new Date()) {
+    return { isBlocked: true, message: `Compte bloqué jusqu'au ${user.blockedUntil.toLocaleString()}` };
+  }
+
+  await resetDailyActions(user);
+  const dailyLimits = { likes: 10, views: 10, follows: 5 };
+  if (user.dailyActions[actionType + 's'] >= dailyLimits[actionType + 's']) {
+    user.blockedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await user.save();
+    return { isBlocked: true, message: `Limite quotidienne de ${actionType}s atteinte. Compte bloqué pour 24h.` };
+  }
+
+  const recentActions = await Action.countDocuments({
+    user: userId,
+    ip,
+    actionType,
+    media: mediaId,
+    createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) },
+  });
+  if (recentActions > 5) {
+    user.blockedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await user.save();
+    return { isBlocked: true, message: 'Activité suspecte détectée. Compte bloqué pour 24h.' };
+  }
+
+  user.ipHistory = user.ipHistory || [];
+  user.ipHistory.push({ ip, lastAction: new Date() });
+  user.ipHistory = user.ipHistory.filter(entry => new Date(entry.lastAction) > new Date(Date.now() - 24 * 60 * 60 * 1000));
+  await user.save();
+
+  return { isBlocked: false };
+};
+
+// WebSocket : Gestion des connexions
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next(new Error('Authentification requise'));
@@ -269,7 +327,7 @@ app.get('/media/:id', async (req, res) => {
       : `${req.protocol}://${req.get('host')}/uploads/${media.filename}`;
     const pageUrl = `${req.protocol}://${req.get('host')}/media/${media._id}`;
     const title = media.originalname || 'Média sur Pixels Media';
-    const description = media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !';
+    const description = `${media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !'} (${media.points} FCFA)`;
     const isImage = !isYouTube && !isTikTok && !isFacebook && media.filename?.match(/\.(jpg|jpeg|png|gif)$/i);
     const ogType = isYouTube || isTikTok || isFacebook ? 'video' : isImage ? 'image' : 'video';
     const twitterCard = isYouTube || isTikTok || isFacebook ? 'player' : isImage ? 'summary_large_image' : 'player';
@@ -364,13 +422,13 @@ app.get('/media/:id', async (req, res) => {
           }
         </style>
         <script>
-          window.location.href = 'http://localhost:3000/media/${media._id}';
+          window.location.href = 'http://localhost:3000';
         </script>
       </head>
       <body>
         <div class="media-container">
           <h1>${title}</h1>
-          <p>Par : ${media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}</p>
+          <p>Par : ${media.owner?.username || media.owner?.email || 'Utilisateur inconnu'} (${media.points} FCFA)</p>
           ${isYouTube ? `
             <a href="${mediaUrl}" target="_blank" class="external-video media-content">Voir sur YouTube</a>
           ` : isTikTok ? `
@@ -461,6 +519,7 @@ app.post('/register', async (req, res) => {
       verificationToken,
       profilePicture: '',
       points: 100,
+      ipHistory: [{ ip: getClientIp(req), lastAction: new Date() }],
     });
 
     const verificationLink = `http://localhost:5000/verify-email?token=${verificationToken}`;
@@ -494,6 +553,8 @@ app.post('/request-verification', verifyToken, async (req, res) => {
     const verificationCode = generateVerificationCode();
     user.verificationCode = verificationCode;
     user.verificationCodeExpires = Date.now() + 15 * 60 * 1000;
+    user.ipHistory = user.ipHistory || [];
+    user.ipHistory.push({ ip: getClientIp(req), lastAction: new Date() });
     await user.save();
 
     const mailOptions = {
@@ -538,6 +599,8 @@ app.post('/verify-code', verifyToken, async (req, res) => {
     user.verificationCode = undefined;
     user.verificationCodeExpires = undefined;
     user.verificationToken = undefined;
+    user.ipHistory = user.ipHistory || [];
+    user.ipHistory.push({ ip: getClientIp(req), lastAction: new Date() });
     await user.save();
 
     res.json({ message: 'Compte vérifié avec succès.' });
@@ -558,6 +621,8 @@ app.get('/verify-email', async (req, res) => {
     user.verificationToken = undefined;
     user.verificationCode = undefined;
     user.verificationCodeExpires = undefined;
+    user.ipHistory = user.ipHistory || [];
+    user.ipHistory.push({ ip: getClientIp(req), lastAction: new Date() });
     await user.save();
 
     res.json({ message: 'Email vérifié avec succès.' });
@@ -574,11 +639,18 @@ app.post('/login', async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (user.blockedUntil && user.blockedUntil > new Date()) {
+      return res.status(403).json({ message: `Compte bloqué jusqu'au ${user.blockedUntil.toLocaleString()}` });
+    }
 
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) return res.status(401).json({ message: 'Mot de passe incorrect' });
 
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '2h' });
+    user.ipHistory = user.ipHistory || [];
+    user.ipHistory.push({ ip: getClientIp(req), lastAction: new Date() });
+    await user.save();
+
     res.json({
       token,
       user: {
@@ -676,19 +748,21 @@ app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (
   }
 });
 
-// Route pour uploader un média (local, YouTube, TikTok, ou Facebook)
+// Route pour uploader un média
 app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
-  const { originalname, youtubeUrl, tiktokUrl, facebookUrl } = req.body;
+  const { originalname, youtubeUrl, tiktokUrl, facebookUrl, points } = req.body;
   try {
     const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-
     if (!originalname || !originalname.trim()) {
       return res.status(400).json({ message: 'Le nom du média est requis' });
     }
-
     if (!req.file && !youtubeUrl && !tiktokUrl && !facebookUrl) {
-      return res.status(400).json({ message: 'Veuillez fournir un fichier ou une URL (YouTube, TikTok, ou Facebook)' });
+      return res.status(400).json({ message: 'Fichier ou URL requis' });
+    }
+    if (points && isNaN(points) || points < 0) {
+      return res.status(400).json({ message: 'Points invalides' });
     }
 
     if (youtubeUrl) {
@@ -712,215 +786,184 @@ app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
       }
     }
 
-    const mediaData = {
-      filename: req.file ? req.file.filename : null,
-      youtubeUrl: youtubeUrl || null,
-      tiktokUrl: tiktokUrl || null,
-      facebookUrl: facebookUrl || null,
-      originalname: originalname.trim(),
+    const media = await Media.create({
+      filename: req.file ? `/uploads/${req.file.filename}` : undefined,
+      youtubeUrl,
+      tiktokUrl,
+      facebookUrl,
+      originalname,
       owner: req.user.userId,
-      likes: [],
-      dislikes: [],
-      views: [],
-      comments: [],
-    };
-
-    const media = await Media.create(mediaData);
-    const populatedMedia = await Media.findById(media._id)
-      .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
-      .lean();
-
-    res.status(201).json({
-      message: 'Média uploadé',
-      media: {
-        ...populatedMedia,
-        filename: populatedMedia.filename ? `${req.protocol}://${req.get('host')}/uploads/${populatedMedia.filename}` : null,
-        owner: {
-          ...populatedMedia.owner,
-          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
-        }
-      }
+      points: Number(points) || 0
     });
 
-    io.to(user._id.toString()).emit('newMedia', {
-      media: {
-        ...populatedMedia,
-        filename: populatedMedia.filename ? `${req.protocol}://${req.get('host')}/uploads/${populatedMedia.filename}` : null,
-        owner: {
-          ...populatedMedia.owner,
-          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
-        }
-      },
-      owner: user
+    await PointsTransaction.create({
+      user: req.user.userId,
+      media: media._id,
+      points: Number(points) || 0,
+      type: 'credit',
+      actionType: 'add',
+      platform: req.file ? 'local' : youtubeUrl ? 'youtube' : tiktokUrl ? 'tiktok' : 'facebook',
+      ip: getClientIp(req)
     });
+
+    io.emit('newMedia', { media: { ...media._doc, owner: { username: user.username, email: user.email, profilePicture: user.profilePicture } } });
+    res.json({ message: 'Média uploadé avec succès', media });
   } catch (error) {
     console.error('Erreur /upload:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Route pour initier une action (like, view, follow)
-app.post('/action/:mediaId/:actionType/:platform', verifyToken, async (req, res) => {
-  const { mediaId, actionType, platform } = req.params;
+// Route pour mettre à jour un média
+app.put('/media/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const { originalname, youtubeUrl, tiktokUrl, facebookUrl, points } = req.body;
   try {
-    const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-
-    await resetDailyActions(user);
-
-    const media = await Media.findById(mediaId);
+    const media = await Media.findById(id);
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
-
-    const platformField = platform === 'youtube' ? 'youtubeUrl' : platform === 'tiktok' ? 'tiktokUrl' : 'facebookUrl';
-    if (!media[platformField]) return res.status(400).json({ message: `Aucun URL ${platform} pour ce média` });
-
-    // Vérification des limites quotidiennes
-    const dailyLimits = { likes: 10, views: 10, follows: 5 };
-    if (user.dailyActions[actionType + 's'] >= dailyLimits[actionType + 's']) {
-      return res.status(403).json({ message: `Limite quotidienne de ${actionType}s atteinte` });
+    if (media.owner.toString() !== req.user.userId) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
+    if (!originalname || !originalname.trim()) {
+      return res.status(400).json({ message: 'Le nom du média est requis' });
+    }
+    if (points && isNaN(points) || points < 0) {
+      return res.status(400).json({ message: 'Points invalides' });
     }
 
-    // Vérification si l'action a déjà été effectuée
-    const existingAction = await Action.findOne({
+    if (youtubeUrl) {
+      const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=|embed\/|v\/|.+\?v=)?([^&=%\?]{11})/;
+      if (!youtubeRegex.test(youtubeUrl)) {
+        return res.status(400).json({ message: 'URL YouTube invalide' });
+      }
+    }
+
+    if (tiktokUrl) {
+      const tiktokRegex = /^(https?:\/\/)?(www\.)?(tiktok\.com)\/.+$/;
+      if (!tiktokRegex.test(tiktokUrl)) {
+        return res.status(400).json({ message: 'URL TikTok invalide' });
+      }
+    }
+
+    if (facebookUrl) {
+      const facebookRegex = /^(https?:\/\/)?(www\.)?(facebook\.com|fb\.com)\/.+$/;
+      if (!facebookRegex.test(facebookUrl)) {
+        return res.status(400).json({ message: 'URL Facebook invalide' });
+      }
+    }
+
+    media.originalname = originalname;
+    media.youtubeUrl = youtubeUrl || undefined;
+    media.tiktokUrl = tiktokUrl || undefined;
+    media.facebookUrl = facebookUrl || undefined;
+    media.points = Number(points) || media.points;
+    await media.save();
+
+    await PointsTransaction.create({
       user: req.user.userId,
-      media: mediaId,
-      actionType,
-      platform,
-      validated: true,
+      media: media._id,
+      points: Number(points) || media.points,
+      type: 'update',
+      actionType: 'update',
+      platform: media.filename ? 'local' : media.youtubeUrl ? 'youtube' : media.tiktokUrl ? 'tiktok' : 'facebook',
+      ip: getClientIp(req)
     });
-    if (existingAction) {
-      return res.status(400).json({ message: `Vous avez déjà effectué cette action (${actionType}) sur ce média pour ${platform}` });
+
+    io.to(req.user.userId).emit('mediaPointsUpdate', { mediaId: media._id, points: media.points });
+    res.json({ message: 'Média mis à jour', media });
+  } catch (error) {
+    console.error('Erreur /media/:id:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// Route pour réinitialiser les points d'un média
+app.put('/media/:id/points', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const { points } = req.body;
+  try {
+    const media = await Media.findById(id);
+    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
+    if (media.owner.toString() !== req.user.userId) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
+    if (points !== 0) {
+      return res.status(400).json({ message: 'Réinitialisation à 0 uniquement' });
     }
 
-    // Générer un token temporaire pour l'action
-    const actionToken = crypto.randomBytes(16).toString('hex');
-    await Action.create({
+    media.points = 0;
+    await media.save();
+
+    await PointsTransaction.create({
       user: req.user.userId,
-      media: mediaId,
-      actionType,
-      platform,
-      token: actionToken,
-      validated: false,
+      media: media._id,
+      points: 0,
+      type: 'reset',
+      actionType: 'reset',
+      platform: media.filename ? 'local' : media.youtubeUrl ? 'youtube' : media.tiktokUrl ? 'tiktok' : 'facebook',
+      ip: getClientIp(req)
     });
 
-    // Ajouter le token à l'URL
-    const actionUrl = `${media[platformField]}?actionToken=${actionToken}`;
-    res.json({ message: 'Action initiée', actionUrl });
+    io.to(req.user.userId).emit('mediaPointsUpdate', { mediaId: media._id, points: 0 });
+    res.json({ message: 'Points réinitialisés', media });
   } catch (error) {
-    console.error(`Erreur /action/${mediaId}/${actionType}/${platform}:`, error);
+    console.error('Erreur /media/:id/points:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Route pour valider une action
-app.post('/validate-action/:token', verifyToken, async (req, res) => {
-  const { token } = req.params;
+// Route pour supprimer un média
+app.delete('/media/:id', verifyToken, async (req, res) => {
   try {
-    const action = await Action.findOne({ token, user: req.user.userId });
-    if (!action) return res.status(404).json({ message: 'Action non trouvée ou invalide' });
-    if (action.validated) return res.status(400).json({ message: 'Action déjà validée' });
-
-    const user = await User.findById(req.user.userId);
-    await resetDailyActions(user);
-
-    // Simulation de la validation (dans un scénario réel, utiliser l'API de la plateforme)
-    // Ici, nous supposons que l'action est validée après un délai (par exemple, 60s pour une vue)
-    const now = new Date();
-    const actionAge = (now - new Date(action.createdAt)) / 1000;
-    if (action.actionType === 'view' && actionAge < 60) {
-      return res.status(400).json({ message: 'Vous devez regarder la vidéo pendant au moins 60 secondes' });
+    const media = await Media.findById(req.params.id);
+    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
+    if (media.owner.toString() !== req.user.userId) {
+      return res.status(403).json({ message: 'Non autorisé' });
     }
 
-    // Attribuer les points
-    const pointsMap = { like: 50, view: 50, follow: 100 };
-    user.points += pointsMap[action.actionType];
-    user.dailyActions[action.actionType + 's'] += 1;
-    action.validated = true;
-    await Promise.all([user.save(), action.save()]);
+    if (media.filename) {
+      try {
+        await fs.unlink(path.join(__dirname, media.filename));
+      } catch (err) {
+        console.error('Erreur lors de la suppression du fichier:', err);
+      }
+    }
 
-    res.json({ message: 'Action validée', points: user.points });
-    io.to(user._id.toString()).emit('pointsUpdate', { points: user.points });
+    await media.deleteOne();
+    io.emit('mediaDeleted', { mediaId: req.params.id });
+    res.json({ message: 'Média supprimé' });
   } catch (error) {
-    console.error('Erreur /validate-action:', error);
+    console.error('Erreur /media/:id:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Route pour récupérer le feed des médias des abonnés
-app.get('/feed', verifyToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId).lean();
-    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-
-    const medias = await Media.find({ owner: { $in: user.following || [] } })
-      .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
-      .populate('comments.author', 'username profilePicture')
-      .sort({ uploadedAt: -1 })
-      .lean();
-
-    const mediasWithLikes = medias.map(media => ({
-      ...media,
-      filename: media.filename ? `${req.protocol}://${req.get('host')}/uploads/${media.filename}` : null,
-      likesCount: Array.isArray(media.likes) ? media.likes.length : 0,
-      dislikesCount: Array.isArray(media.dislikes) ? media.dislikes.length : 0,
-      viewsCount: Array.isArray(media.views) ? media.views.length : 0,
-      isLiked: Array.isArray(media.likes) && media.likes.some(id => id.toString() === req.user.userId),
-      isDisliked: Array.isArray(media.dislikes) && media.dislikes.some(id => id.toString() === req.user.userId),
-      owner: {
-        ...media.owner,
-        profilePicture: media.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${media.owner.profilePicture}` : ''
-      },
-      comments: media.comments.map(comment => ({
-        ...comment,
-        media: comment.media ? `${req.protocol}://${req.get('host')}/uploads/${comment.media}` : null,
-        author: {
-          ...comment.author,
-          profilePicture: comment.author.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${comment.author.profilePicture}` : ''
-        }
-      }))
-    }));
-
-    res.json(mediasWithLikes || []);
-  } catch (error) {
-    console.error('Erreur /feed:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
-  }
-});
-
-// Route pour lister les utilisateurs
+// Route pour récupérer les utilisateurs
 app.get('/users', verifyToken, async (req, res) => {
+  const { q } = req.query;
   try {
-    const q = req.query.q || '';
-    const users = await User.find({
-      $or: [
-        { email: { $regex: q, $options: 'i' } },
-        { username: { $regex: q, $options: 'i' } },
-      ],
-      _id: { $ne: req.user.userId },
-    }).select('email username whatsappNumber whatsappMessage profilePicture points').lean();
-    res.json(users.map(user => ({
-      ...user,
-      profilePicture: user.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${user.profilePicture}` : ''
-    })) || []);
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    const query = q
+      ? {
+          $and: [
+            { _id: { $ne: req.user.userId } },
+            { $or: [{ email: new RegExp(q, 'i') }, { username: new RegExp(q, 'i') }] },
+          ],
+        }
+      : { _id: { $ne: req.user.userId } };
+
+    const users = await User.find(query)
+      .select('email username profilePicture')
+      .lean()
+      .limit(50);
+    res.json(users.map(u => ({
+      ...u,
+      profilePicture: u.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${u.profilePicture}` : ''
+    })));
   } catch (error) {
     console.error('Erreur /users:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
-  }
-});
-
-// Route pour lister les utilisateurs suivis
-app.get('/follows', verifyToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId)
-      .populate('following', 'email username whatsappNumber whatsappMessage profilePicture points')
-      .lean();
-    res.json(user.following.map(follow => ({
-      ...follow,
-      profilePicture: follow.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${follow.profilePicture}` : ''
-    })) || []);
-  } catch (error) {
-    console.error('Erreur /follows:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
@@ -930,17 +973,35 @@ app.post('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
     const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (user.blockedUntil && user.blockedUntil > new Date()) {
+      return res.status(403).json({ message: `Compte bloqué jusqu'au ${user.blockedUntil.toLocaleString()}` });
+    }
 
+    const fraudCheck = await checkFraud(req.user.userId, getClientIp(req), 'follow', null);
+    if (fraudCheck.isBlocked) return res.status(403).json({ message: fraudCheck.message });
+
+    const toFollow = await User.findById(followingId);
+    if (!toFollow) return res.status(404).json({ message: 'Utilisateur à suivre non trouvé' });
     if (user.following.includes(followingId)) {
-      return res.status(400).json({ message: 'Déjà abonné à cet utilisateur' });
+      return res.status(400).json({ message: 'Déjà suivi' });
     }
 
     user.following.push(followingId);
+    user.dailyActions.follows += 1;
+    user.points += 100;
     await user.save();
 
-    res.json({ message: 'Abonnement effectué', points: user.points });
-    io.to(req.user.userId).emit('followUpdate', { userId: req.user.userId, followingId, points: user.points });
+    await PointsTransaction.create({
+      user: req.user.userId,
+      points: 100,
+      type: 'credit',
+      actionType: 'follow',
+      ip: getClientIp(req)
+    });
+
+    io.to(req.user.userId).emit('pointsUpdate', { points: user.points });
+    res.json({ message: 'Utilisateur suivi', points: user.points });
   } catch (error) {
     console.error('Erreur /follow:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -952,120 +1013,200 @@ app.delete('/follow', verifyToken, async (req, res) => {
   const { followingId } = req.body;
   try {
     const user = await User.findById(req.user.userId);
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (!user.following.includes(followingId)) {
+      return res.status(400).json({ message: 'Non suivi' });
+    }
 
     user.following = user.following.filter(id => id.toString() !== followingId);
     await user.save();
-
-    res.json({ message: 'Désabonnement effectué' });
-    io.to(req.user.userId).emit('unfollowUpdate', { userId: req.user.userId, unfollowedId: followingId });
+    res.json({ message: 'Désabonnement réussi' });
   } catch (error) {
-    console.error('Erreur /follow DELETE:', error);
+    console.error('Erreur /follow:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Route pour récupérer ses propres médias
+// Route pour récupérer les abonnements
+app.get('/follows', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('following', 'email username profilePicture').lean();
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    res.json(user.following.map(f => ({
+      ...f,
+      profilePicture: f.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${f.profilePicture}` : ''
+    })));
+  } catch (error) {
+    console.error('Erreur /follows:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// Route pour récupérer le fil
+app.get('/feed', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    const medias = await Media.find({ owner: { $in: user.following } })
+      .populate('owner', 'username email profilePicture')
+      .sort({ uploadedAt: -1 })
+      .lean()
+      .limit(50);
+    res.json(medias.map(m => ({
+      ...m,
+      filename: m.filename ? `${req.protocol}://${req.get('host')}${m.filename}` : undefined,
+      owner: {
+        ...m.owner,
+        profilePicture: m.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${m.owner.profilePicture}` : ''
+      }
+    })));
+  } catch (error) {
+    console.error('Erreur /feed:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// Route pour récupérer mes médias
 app.get('/my-medias', verifyToken, async (req, res) => {
   try {
-    const list = await Media.find({ owner: req.user.userId })
+    const medias = await Media.find({ owner: req.user.userId })
+      .populate('owner', 'username email profilePicture')
       .sort({ uploadedAt: -1 })
       .lean();
-    res.json(list.map(media => ({
-      ...media,
-      filename: media.filename ? `${req.protocol}://${req.get('host')}/uploads/${media.filename}` : null,
-      youtubeUrl: media.youtubeUrl || null,
-      tiktokUrl: media.tiktokUrl || null,
-      facebookUrl: media.facebookUrl || null
-    })) || []);
+    res.json(medias.map(m => ({
+      ...m,
+      filename: m.filename ? `${req.protocol}://${req.get('host')}${m.filename}` : undefined,
+      owner: {
+        ...m.owner,
+        profilePicture: m.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${m.owner.profilePicture}` : ''
+      }
+    })));
   } catch (error) {
     console.error('Erreur /my-medias:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Route pour modifier le nom d’un média
-app.put('/media/:id', verifyToken, async (req, res) => {
+// Route pour effectuer une action (like, view, follow)
+app.post('/action/:mediaId/:actionType/:platform', verifyToken, async (req, res) => {
+  const { mediaId, actionType, platform } = req.params;
   try {
-    const media = await Media.findById(req.params.id);
-    if (!media || media.owner.toString() !== req.user.userId)
-      return res.status(403).json({ message: 'Non autorisé' });
-
-    const { originalname, youtubeUrl, tiktokUrl, facebookUrl } = req.body;
-    if (!originalname || !originalname.trim()) {
-      return res.status(400).json({ message: 'Le nom du média est requis' });
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (user.blockedUntil && user.blockedUntil > new Date()) {
+      return res.status(403).json({ message: `Compte bloqué jusqu'au ${user.blockedUntil.toLocaleString()}` });
     }
 
-    if (youtubeUrl) {
-      const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=|embed\/|v\/|.+\?v=)?([^&=%\?]{11})/;
-      if (!youtubeRegex.test(youtubeUrl)) {
-        return res.status(400).json({ message: 'URL YouTube invalide' });
-      }
+    const media = await Media.findById(mediaId);
+    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
+    if (media.owner.toString() === req.user.userId) {
+      return res.status(400).json({ message: 'Vous ne pouvez pas interagir avec votre propre média' });
+    }
+    if (!['youtube', 'tiktok', 'facebook'].includes(platform)) {
+      return res.status(400).json({ message: 'Plateforme invalide' });
+    }
+    if (!['like', 'view', 'follow'].includes(actionType)) {
+      return res.status(400).json({ message: 'Type d’action invalide' });
+    }
+    if (!media[`${platform}Url`]) {
+      return res.status(400).json({ message: `URL ${platform} non disponible pour ce média` });
+    }
+    if (media.points < (actionType === 'follow' ? 100 : 50)) {
+      return res.status(400).json({ message: 'Points insuffisants pour cette action' });
     }
 
-    if (tiktokUrl) {
-      const tiktokRegex = /^(https?:\/\/)?(www\.)?(tiktok\.com)\/.+$/;
-      if (!tiktokRegex.test(tiktokUrl)) {
-        return res.status(400).json({ message: 'URL TikTok invalide' });
-      }
-    }
+    const fraudCheck = await checkFraud(req.user.userId, getClientIp(req), actionType, mediaId);
+    if (fraudCheck.isBlocked) return res.status(403).json({ message: fraudCheck.message });
 
-    if (facebookUrl) {
-      const facebookRegex = /^(https?:\/\/)?(www\.)?(facebook\.com|fb\.com)\/.+$/;
-      if (!facebookRegex.test(facebookUrl)) {
-        return res.status(400).json({ message: 'URL Facebook invalide' });
-      }
-    }
-
-    media.originalname = originalname.trim();
-    media.youtubeUrl = youtubeUrl || null;
-    media.tiktokUrl = tiktokUrl || null;
-    media.facebookUrl = facebookUrl || null;
-
-    await media.save();
-    const populatedMedia = await Media.findById(req.params.id)
-      .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
-      .lean();
-
-    res.json({
-      message: 'Média mis à jour',
-      media: {
-        ...populatedMedia,
-        filename: populatedMedia.filename ? `${req.protocol}://${req.get('host')}/uploads/${populatedMedia.filename}` : null,
-        owner: {
-          ...populatedMedia.owner,
-          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
-        }
-      }
+    const pointsToDeduct = actionType === 'follow' ? 100 : 50;
+    const actionToken = crypto.randomBytes(16).toString('hex');
+    const action = await Action.create({
+      user: req.user.userId,
+      media: mediaId,
+      actionType,
+      platform,
+      token: actionToken,
+      ip: getClientIp(req)
     });
+
+    user.dailyActions[actionType + 's'] += 1;
+    user.points += pointsToDeduct;
+    media.points -= pointsToDeduct;
+    await user.save();
+    await media.save();
+
+    await PointsTransaction.create({
+      user: req.user.userId,
+      media: mediaId,
+      points: pointsToDeduct,
+      type: 'credit',
+      actionType,
+      platform,
+      ip: getClientIp(req)
+    });
+
+    await PointsTransaction.create({
+      user: media.owner,
+      media: mediaId,
+      points: -pointsToDeduct,
+      type: 'debit',
+      actionType,
+      platform,
+      ip: getClientIp(req)
+    });
+
+    io.to(req.user.userId).emit('pointsUpdate', { points: user.points });
+    io.to(media.owner.toString()).emit('pointsUpdate', { points: (await User.findById(media.owner)).points });
+    io.emit('mediaPointsUpdate', { mediaId, points: media.points });
+
+    res.json({ message: 'Action enregistrée', actionUrl: `${media[`${platform}Url`]}?actionToken=${actionToken}` });
   } catch (error) {
-    console.error('Erreur /media/:id PUT:', error);
+    console.error('Erreur /action:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Route pour supprimer un média
-app.delete('/media/:id', verifyToken, async (req, res) => {
+// Route pour valider une action
+app.post('/validate-action/:actionToken', verifyToken, async (req, res) => {
+  const { actionToken } = req.params;
   try {
-    const media = await Media.findById(req.params.id);
-    if (!media || media.owner.toString() !== req.user.userId)
+    const action = await Action.findOne({ token: actionToken }).populate('media');
+    if (!action) return res.status(404).json({ message: 'Action non trouvée' });
+    if (action.user.toString() !== req.user.userId) {
       return res.status(403).json({ message: 'Non autorisé' });
+    }
+    if (action.validated) return res.status(400).json({ message: 'Action déjà validée' });
 
-    if (media.filename) {
-      try {
-        const filePath = path.join(__dirname, 'Uploads', media.filename);
-        await fs.access(filePath);
-        await fs.unlink(filePath);
-      } catch (err) {
-        console.error(`Erreur lors de la suppression du fichier ${media.filename}:`, err);
+    action.validated = true;
+    await action.save();
+
+    const user = await User.findById(req.user.userId);
+    res.json({ message: 'Action validée', points: user.points, mediaPoints: action.media.points });
+  } catch (error) {
+    console.error('Erreur /validate-action:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// Route pour calculer l'espace disque utilisé
+app.get('/disk-usage', verifyToken, async (req, res) => {
+  try {
+    const medias = await Media.find({ owner: req.user.userId });
+    let totalSize = 0;
+    for (const media of medias) {
+      if (media.filename) {
+        try {
+          const stats = await fs.stat(path.join(__dirname, media.filename));
+          totalSize += stats.size;
+        } catch (err) {
+          console.error(`Erreur stat fichier ${media.filename}:`, err);
+        }
       }
     }
-
-    await media.deleteOne();
-    res.json({ message: 'Fichier supprimé' });
-    io.emit('mediaDeleted', { mediaId: req.params.id });
+    res.json({ used: totalSize });
   } catch (error) {
-    console.error('Erreur /media/:id DELETE:', error);
+    console.error('Erreur /disk-usage:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
@@ -1492,47 +1633,6 @@ app.post('/view/:mediaId', verifyToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Erreur /view/:mediaId POST:', error);
-    res.status(500).json({ message: 'Erreur serveur', error: error.message });
-  }
-});
-
-// Route pour récupérer l'utilisation de l'espace disque
-app.get('/disk-usage', verifyToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
-    if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-
-    const medias = await Media.find({ owner: req.user.userId }).lean();
-    let totalSize = 0;
-
-    for (const media of medias) {
-      if (media.filename) {
-        try {
-          const filePath = path.join(__dirname, 'Uploads', media.filename);
-          await fs.access(filePath);
-          const stats = await fs.stat(filePath);
-          totalSize += stats.size;
-        } catch (err) {
-          console.error(`Erreur lors de la lecture du fichier ${media.filename}:`, err);
-        }
-      }
-    }
-
-    if (user.profilePicture) {
-      try {
-        const profilePicturePath = path.join(__dirname, 'Uploads', 'profiles', user.profilePicture);
-        await fs.access(profilePicturePath);
-        const stats = await fs.stat(profilePicturePath);
-        totalSize += stats.size;
-      } catch (err) {
-        console.error(`Erreur lors de la lecture de la photo de profil ${user.profilePicture}:`, err);
-      }
-    }
-
-    res.json({ used: totalSize });
-  } catch (error) {
-    console.error('Erreur /disk-usage:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });

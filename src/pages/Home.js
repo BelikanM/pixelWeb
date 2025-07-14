@@ -70,6 +70,7 @@ export default function Profile() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [tiktokUrl, setTiktokUrl] = useState('');
   const [facebookUrl, setFacebookUrl] = useState('');
+  const [mediaPoints, setMediaPoints] = useState(''); // État pour les points lors de l'upload/édition
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isMuted, setIsMuted] = useState(true);
@@ -268,6 +269,19 @@ export default function Profile() {
         setPoints(points || 0);
       });
 
+      socket.on('mediaPointsUpdate', ({ mediaId, points }) => {
+        setFeed((prev) =>
+          prev.map((media) =>
+            media._id === mediaId ? { ...media, points } : media
+          )
+        );
+        setMyMedias((prev) =>
+          prev.map((media) =>
+            media._id === mediaId ? { ...media, points } : media
+          )
+        );
+      });
+
       socket.on('connect_error', (err) => {
         console.error('Erreur WebSocket:', err.message);
         setError('Erreur de connexion WebSocket');
@@ -279,6 +293,7 @@ export default function Profile() {
         socket.off('mediaDeleted');
         socket.off('profilePictureUpdate');
         socket.off('pointsUpdate');
+        socket.off('mediaPointsUpdate');
         socket.disconnect();
       };
     }
@@ -433,6 +448,10 @@ export default function Profile() {
       setError('Le nom du média est requis.');
       return;
     }
+    if (mediaPoints && (isNaN(mediaPoints) || mediaPoints < 0)) {
+      setError('Les points doivent être un nombre positif ou zéro.');
+      return;
+    }
     setLoading(true);
     setError('');
     setSuccess('');
@@ -442,6 +461,7 @@ export default function Profile() {
     if (youtubeUrl) formData.append('youtubeUrl', youtubeUrl);
     if (tiktokUrl) formData.append('tiktokUrl', tiktokUrl);
     if (facebookUrl) formData.append('facebookUrl', facebookUrl);
+    formData.append('points', mediaPoints || 0);
 
     try {
       const res = await fetch(`${API_URL}/upload`, {
@@ -458,6 +478,7 @@ export default function Profile() {
         setYoutubeUrl('');
         setTiktokUrl('');
         setFacebookUrl('');
+        setMediaPoints('');
         loadDiskUsage();
       } else {
         setError(data.message || 'Erreur lors de l’upload du média');
@@ -469,15 +490,23 @@ export default function Profile() {
     }
   };
 
-  const handleEditMedia = async (mediaId, name, youtubeUrl, tiktokUrl, facebookUrl) => {
+  const handleEditMedia = async (mediaId, name, youtubeUrl, tiktokUrl, facebookUrl, points) => {
     setLoading(true);
     setError('');
     setSuccess('');
+    if (!name.trim()) {
+      setError('Le nom du média est requis.');
+      return;
+    }
+    if (points && (isNaN(points) || points < 0)) {
+      setError('Les points doivent être un nombre positif ou zéro.');
+      return;
+    }
     try {
       const res = await fetch(`${API_URL}/media/${mediaId}`, {
         method: 'PUT',
         headers: { Authorization: token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ originalname: name, youtubeUrl, tiktokUrl, facebookUrl }),
+        body: JSON.stringify({ originalname: name, youtubeUrl, tiktokUrl, facebookUrl, points: points || 0 }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -489,8 +518,34 @@ export default function Profile() {
         setYoutubeUrl('');
         setTiktokUrl('');
         setFacebookUrl('');
+        setMediaPoints('');
       } else {
         setError(data.message || 'Erreur lors de la mise à jour du média');
+      }
+    } catch {
+      setError('Erreur réseau. Veuillez réessayer.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetMediaPoints = async (mediaId) => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch(`${API_URL}/media/${mediaId}/points`, {
+        method: 'PUT',
+        headers: { Authorization: token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points: 0 }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMyMedias((prev) => prev.map((m) => (m._id === mediaId ? data.media : m)));
+        setFeed((prev) => prev.map((m) => (m._id === mediaId ? data.media : m)));
+        setSuccess('Points du média réinitialisés !');
+      } else {
+        setError(data.message || 'Erreur lors de la réinitialisation des points');
       }
     } catch {
       setError('Erreur réseau. Veuillez réessayer.');
@@ -598,6 +653,16 @@ export default function Profile() {
               const validateData = await validateRes.json();
               if (validateRes.ok) {
                 setPoints(validateData.points);
+                setFeed((prev) =>
+                  prev.map((m) =>
+                    m._id === mediaId ? { ...m, points: validateData.mediaPoints } : m
+                  )
+                );
+                setMyMedias((prev) =>
+                  prev.map((m) =>
+                    m._id === mediaId ? { ...m, points: validateData.mediaPoints } : m
+                  )
+                );
                 setSuccess(`Action ${actionType} validée ! +${actionType === 'follow' ? 100 : 50} FCFA`);
               } else {
                 setError(validateData.message || 'Erreur lors de la validation');
@@ -693,6 +758,56 @@ export default function Profile() {
                 </p>
               </a>
             </div>
+          ) : media.tiktokUrl ? (
+            <div className="ratio ratio-16x9">
+              <a
+                href={media.tiktokUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tiktok-media-content d-flex align-items-center justify-content-center bg-dark text-white"
+              >
+                <p className="text-center">
+                  Vidéo TikTok. <br />
+                  <button
+                    className="btn btn-dark btn-sm mt-2"
+                    onClick={() => handleAction(media._id, 'view', 'tiktok')}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    ) : (
+                      <FaTiktok />
+                    )}
+                    Voir sur TikTok
+                  </button>
+                </p>
+              </a>
+            </div>
+          ) : media.facebookUrl ? (
+            <div className="ratio ratio-16x9">
+              <a
+                href={media.facebookUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tiktok-media-content d-flex align-items-center justify-content-center bg-dark text-white"
+              >
+                <p className="text-center">
+                  Vidéo Facebook. <br />
+                  <button
+                    className="btn btn-primary btn-sm mt-2"
+                    onClick={() => handleAction(media._id, 'view', 'facebook')}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    ) : (
+                      <FaFacebook />
+                    )}
+                    Voir sur Facebook
+                  </button>
+                </p>
+              </a>
+            </div>
           ) : media.filename?.match(/\.(jpg|jpeg|png|gif)$/i) ? (
             <Link to={`/media/${media._id}`} className="media-link">
               <img
@@ -767,6 +882,7 @@ export default function Profile() {
               )}
               Par : {media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}
             </p>
+            <p className="text-white small">Points : {media.points} FCFA</p>
             {media.owner?.whatsappNumber && (
               <p className="text-white small">
                 <a
@@ -795,11 +911,20 @@ export default function Profile() {
                     setYoutubeUrl(media.youtubeUrl || '');
                     setTiktokUrl(media.tiktokUrl || '');
                     setFacebookUrl(media.facebookUrl || '');
+                    setMediaPoints(media.points || '');
                   }}
                   disabled={loading}
                   aria-label="Modifier le média"
                 >
                   <FaEdit /> Modifier
+                </button>
+                <button
+                  className="btn btn-sm btn-info me-2"
+                  onClick={() => handleResetMediaPoints(media._id)}
+                  disabled={loading}
+                  aria-label="Réinitialiser les points"
+                >
+                  <FaTimes /> Réinitialiser Points
                 </button>
                 <button
                   className="btn btn-sm btn-danger"
@@ -818,7 +943,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-danger me-2"
                       onClick={() => handleAction(media._id, 'view', 'youtube')}
-                      disabled={loading}
+                      disabled={loading || media.points < 50}
                       aria-label="Voir sur YouTube"
                     >
                       {loading ? (
@@ -831,7 +956,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-primary me-2"
                       onClick={() => handleAction(media._id, 'like', 'youtube')}
-                      disabled={loading}
+                      disabled={loading || media.points < 50}
                       aria-label="Liker sur YouTube"
                     >
                       {loading ? (
@@ -844,7 +969,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-success"
                       onClick={() => handleAction(media._id, 'follow', 'youtube')}
-                      disabled={loading}
+                      disabled={loading || media.points < 100}
                       aria-label="S’abonner sur YouTube"
                     >
                       {loading ? (
@@ -861,7 +986,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-dark me-2"
                       onClick={() => handleAction(media._id, 'view', 'tiktok')}
-                      disabled={loading}
+                      disabled={loading || media.points < 50}
                       aria-label="Voir sur TikTok"
                     >
                       {loading ? (
@@ -874,7 +999,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-primary me-2"
                       onClick={() => handleAction(media._id, 'like', 'tiktok')}
-                      disabled={loading}
+                      disabled={loading || media.points < 50}
                       aria-label="Liker sur TikTok"
                     >
                       {loading ? (
@@ -887,7 +1012,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-success"
                       onClick={() => handleAction(media._id, 'follow', 'tiktok')}
-                      disabled={loading}
+                      disabled={loading || media.points < 100}
                       aria-label="S’abonner sur TikTok"
                     >
                       {loading ? (
@@ -904,7 +1029,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-primary me-2"
                       onClick={() => handleAction(media._id, 'view', 'facebook')}
-                      disabled={loading}
+                      disabled={loading || media.points < 50}
                       aria-label="Voir sur Facebook"
                     >
                       {loading ? (
@@ -917,7 +1042,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-primary me-2"
                       onClick={() => handleAction(media._id, 'like', 'facebook')}
-                      disabled={loading}
+                      disabled={loading || media.points < 50}
                       aria-label="Liker sur Facebook"
                     >
                       {loading ? (
@@ -930,7 +1055,7 @@ export default function Profile() {
                     <button
                       className="btn btn-sm btn-success"
                       onClick={() => handleAction(media._id, 'follow', 'facebook')}
-                      disabled={loading}
+                      disabled={loading || media.points < 100}
                       aria-label="S’abonner sur Facebook"
                     >
                       {loading ? (
@@ -946,6 +1071,82 @@ export default function Profile() {
             )}
           </div>
         </div>
+        {isMyMedia && editMediaId === media._id && (
+          <div className="edit-form mt-3">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleEditMedia(media._id, newName, youtubeUrl, tiktokUrl, facebookUrl, mediaPoints);
+              }}
+            >
+              <div className="mb-3">
+                <label className="form-label text-white">Nom du média</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="mb-3">
+                <label className="form-label text-white">Points (FCFA)</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={mediaPoints}
+                  onChange={(e) => setMediaPoints(e.target.value)}
+                  min="0"
+                />
+              </div>
+              <div className="mb-3">
+                <label className="form-label text-white">URL YouTube</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={youtubeUrl}
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                />
+              </div>
+              <div className="mb-3">
+                <label className="form-label text-white">URL TikTok</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={tiktokUrl}
+                  onChange={(e) => setTiktokUrl(e.target.value)}
+                />
+              </div>
+              <div className="mb-3">
+                <label className="form-label text-white">URL Facebook</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={facebookUrl}
+                  onChange={(e) => setFacebookUrl(e.target.value)}
+                />
+              </div>
+              <button type="submit" className="btn btn-success me-2" disabled={loading}>
+                <FaSave /> Enregistrer
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setEditMediaId(null);
+                  setNewName('');
+                  setYoutubeUrl('');
+                  setTiktokUrl('');
+                  setFacebookUrl('');
+                  setMediaPoints('');
+                }}
+                disabled={loading}
+              >
+                <FaTimes /> Annuler
+              </button>
+            </form>
+          </div>
+        )}
       </div>
     );
   };
@@ -1186,6 +1387,54 @@ export default function Profile() {
             Fil
           </button>
         </li>
+        <li className="nav-item">
+          <button
+            className={`nav-link ${activeTab === 'my-medias' ? 'active' : ''}`}
+            onClick={() => setActiveTab('my-medias')}
+          >
+            Mes Médias
+          </button>
+        </li>
+        <li className="nav-item">
+          <button
+            className={`nav-link ${activeTab === 'profile' ? 'active' : ''}`}
+            onClick={() => setActiveTab('profile')}
+          >
+            Profil
+          </button>
+        </li>
+        <li className="nav-item">
+          <button
+            className={`nav-link ${activeTab === 'follows' ? 'active' : ''}`}
+            onClick={() => setActiveTab('follows')}
+          >
+            Abonnements
+          </button>
+        </li>
+        <li className="nav-item">
+          <button
+            className={`nav-link ${activeTab === 'search' ? 'active' : ''}`}
+            onClick={() => setActiveTab('search')}
+          >
+            Recherche
+          </button>
+        </li>
+        <li className="nav-item">
+          <button
+            className={`nav-link ${activeTab === 'upload' ? 'active' : ''}`}
+            onClick={() => setActiveTab('upload')}
+          >
+            Uploader
+          </button>
+        </li>
+        <li className="nav-item">
+          <button
+            className={`nav-link ${activeTab === 'stats' ? 'active' : ''}`}
+            onClick={() => setActiveTab('stats')}
+          >
+            Statistiques
+          </button>
+        </li>
       </ul>
 
       {activeTab === 'feed' && (
@@ -1199,6 +1448,259 @@ export default function Profile() {
           ) : (
             feed.map((media) => renderMedia(media))
           )}
+        </div>
+      )}
+
+      {activeTab === 'my-medias' && (
+        <div className="tiktok-feed">
+          {myMedias.length === 0 ? (
+            <div className="no-content">
+              <p className="text-muted">Vous n’avez pas encore uploadé de médias.</p>
+            </div>
+          ) : (
+            myMedias.map((media) => renderMedia(media, true))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'profile' && (
+        <div className="container mt-5 text-center">
+          <h2 className="text-white">Profil</h2>
+          <form onSubmit={handleUpdateProfile}>
+            <div className="mb-3">
+              <label className="form-label text-white">Photo de profil</label>
+              {profilePicture ? (
+                <img
+                  src={profilePicture}
+                  alt="Photo de profil"
+                  className="rounded-circle mb-2"
+                  style={{ width: '100px', height: '100px', objectFit: 'cover' }}
+                />
+              ) : (
+                <FaUser style={{ fontSize: '100px', color: '#fff' }} />
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                className="form-control"
+                onChange={(e) => setSelectedProfilePicture(e.target.files[0])}
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label text-white">Nom d'utilisateur</label>
+              <input
+                type="text"
+                className="form-control"
+                value={editUsername}
+                onChange={(e) => setEditUsername(e.target.value)}
+                required
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label text-white">Numéro WhatsApp</label>
+              <input
+                type="text"
+                className="form-control"
+                value={whatsappNumber}
+                onChange={(e) => setWhatsappNumber(e.target.value)}
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label text-white">Message WhatsApp par défaut</label>
+              <input
+                type="text"
+                className="form-control"
+                value={whatsappMessage}
+                onChange={(e) => setWhatsappMessage(e.target.value)}
+              />
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? (
+                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+              ) : (
+                'Mettre à jour'
+              )}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {activeTab === 'follows' && (
+        <div className="container mt-5">
+          <h2 className="text-white text-center">Mes Abonnements</h2>
+          {follows.length === 0 ? (
+            <p className="text-muted text-center">Vous ne suivez aucun utilisateur.</p>
+          ) : (
+            <div className="row">
+              {follows.map((user) => (
+                <div key={user._id} className="col-md-4 mb-3">
+                  <div className="card">
+                    <div className="card-body d-flex align-items-center">
+                      {user.profilePicture ? (
+                        <img
+                          src={user.profilePicture}
+                          alt={`Photo de profil de ${user.username || user.email}`}
+                          className="rounded-circle me-3"
+                          style={{ width: '50px', height: '50px', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <FaUser className="me-3" style={{ fontSize: '50px' }} />
+                      )}
+                      <div>
+                        <h5 className="card-title">{user.username || user.email}</h5>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleUnfollow(user._id)}
+                          disabled={loading}
+                        >
+                          <FaUserCheck /> Se désabonner
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'search' && (
+        <div className="container mt-5">
+          <h2 className="text-white text-center">Rechercher des utilisateurs</h2>
+          <div className="mb-3">
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Rechercher par email ou nom d'utilisateur"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="row">
+            {users.map((user) => (
+              <div key={user._id} className="col-md-4 mb-3">
+                <div className="card">
+                  <div className="card-body d-flex align-items-center">
+                    {user.profilePicture ? (
+                      <img
+                        src={user.profilePicture}
+                        alt={`Photo de profil de ${user.username || user.email}`}
+                        className="rounded-circle me-3"
+                        style={{ width: '50px', height: '50px', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <FaUser className="me-3" style={{ fontSize: '50px' }} />
+                    )}
+                    <div>
+                      <h5 className="card-title">{user.username || user.email}</h5>
+                      <button
+                        className="btn btn-success btn-sm"
+                        onClick={() => handleFollow(user._id)}
+                        disabled={loading || follows.some((f) => f._id === user._id)}
+                      >
+                        <FaUserPlus /> Suivre
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'upload' && (
+        <div className="container mt-5 text-center">
+          <h2 className="text-white">Uploader un média</h2>
+          <form onSubmit={handleUpload}>
+            <div className="mb-3">
+              <label className="form-label text-white">Fichier</label>
+              <input
+                type="file"
+                accept="image/*,video/*"
+                className="form-control"
+                onChange={(e) => setFile(e.target.files[0])}
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label text-white">Nom du média</label>
+              <input
+                type="text"
+                className="form-control"
+                value={mediaName}
+                onChange={(e) => setMediaName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label text-white">Points (FCFA)</label>
+              <input
+                type="number"
+                className="form-control"
+                value={mediaPoints}
+                onChange={(e) => setMediaPoints(e.target.value)}
+                min="0"
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label text-white">URL YouTube</label>
+              <input
+                type="text"
+                className="form-control"
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label text-white">URL TikTok</label>
+              <input
+                type="text"
+                className="form-control"
+                value={tiktokUrl}
+                onChange={(e) => setTiktokUrl(e.target.value)}
+              />
+            </div>
+            <div className="mb-3">
+              <label className="form-label text-white">URL Facebook</label>
+              <input
+                type="text"
+                className="form-control"
+                value={facebookUrl}
+                onChange={(e) => setFacebookUrl(e.target.value)}
+              />
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? (
+                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+              ) : (
+                <>
+                  <FaUpload /> Uploader
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {activeTab === 'stats' && (
+        <div className="container mt-5 text-center">
+          <h2 className="text-white">Statistiques</h2>
+          <p className="text-white">Espace disque utilisé : {formatSize(diskUsage.used)}</p>
+          <p className="text-white">Espace disque restant : {formatSize(diskUsage.remaining)}</p>
+          <p className="text-white">Points totaux : {points} FCFA</p>
+          <div className="progress mt-3">
+            <div
+              className="progress-bar"
+              role="progressbar"
+              style={{ width: `${(diskUsage.used / diskUsage.total) * 100}%` }}
+              aria-valuenow={(diskUsage.used / diskUsage.total) * 100}
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              {(diskUsage.used / diskUsage.total) * 100}%
+            </div>
+          </div>
         </div>
       )}
     </div>

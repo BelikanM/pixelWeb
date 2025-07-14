@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera, FaChartPie, FaThumbsUp, FaThumbsDown, FaComment, FaFileUpload, FaYoutube, FaTiktok, FaFacebook } from 'react-icons/fa';
+import { FaTrash, FaEdit, FaUserPlus, FaUserCheck, FaSignOutAlt, FaUpload, FaSave, FaTimes, FaUser, FaPaperPlane, FaWhatsapp, FaCamera, FaChartPie, FaThumbsUp, FaThumbsDown, FaComment, FaFileUpload, FaYoutube, FaTiktok, FaFacebook, FaCoins } from 'react-icons/fa';
 import io from 'socket.io-client';
 import './Profile.css';
 
@@ -45,6 +45,8 @@ export default function Profile() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [tiktokUrl, setTiktokUrl] = useState('');
   const [facebookUrl, setFacebookUrl] = useState('');
+  const [mediaPoints, setMediaPoints] = useState(0); // Nouveau champ pour les points des vidéos
+  const [editMediaPoints, setEditMediaPoints] = useState(0); // Pour l'édition des points
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -183,12 +185,17 @@ export default function Profile() {
     socket.on('pointsUpdate', ({ points }) => {
       setPoints(points);
     });
+    socket.on('mediaPointsUpdate', ({ mediaId, points }) => {
+      setFeed(prev => prev.map(m => (m._id === mediaId ? { ...m, points } : m)));
+      setMyMedias(prev => prev.map(m => (m._id === mediaId ? { ...m, points } : m)));
+    });
 
     return () => {
       socket.off('newMedia');
       socket.off('mediaDeleted');
       socket.off('profilePictureUpdate');
       socket.off('pointsUpdate');
+      socket.off('mediaPointsUpdate');
     };
   }, [loadUserData, loadUsers, loadFollows, loadFeed, loadMyMedias, loadDiskUsage, userId]);
 
@@ -325,12 +332,17 @@ export default function Profile() {
       setError('Le nom du média est requis.');
       return;
     }
+    if (mediaPoints < 0) {
+      setError('Les points ne peuvent pas être négatifs.');
+      return;
+    }
     setLoading(true);
     setError('');
     setSuccess('');
     const formData = new FormData();
     if (file) formData.append('media', file);
     formData.append('originalname', mediaName);
+    formData.append('points', mediaPoints); // Ajout des points
     if (youtubeUrl) formData.append('youtubeUrl', youtubeUrl);
     if (tiktokUrl) formData.append('tiktokUrl', tiktokUrl);
     if (facebookUrl) formData.append('facebookUrl', facebookUrl);
@@ -350,6 +362,7 @@ export default function Profile() {
         setYoutubeUrl('');
         setTiktokUrl('');
         setFacebookUrl('');
+        setMediaPoints(0);
       } else {
         setError(data.message);
       }
@@ -360,7 +373,7 @@ export default function Profile() {
     }
   };
 
-  const handleEditMedia = async (mediaId, name, youtubeUrl, tiktokUrl, facebookUrl) => {
+  const handleEditMedia = async (mediaId, name, youtubeUrl, tiktokUrl, facebookUrl, points) => {
     setLoading(true);
     setError('');
     setSuccess('');
@@ -368,7 +381,7 @@ export default function Profile() {
       const res = await fetch(`${API_URL}/media/${mediaId}`, {
         method: 'PUT',
         headers: { Authorization: token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ originalname: name, youtubeUrl, tiktokUrl, facebookUrl }),
+        body: JSON.stringify({ originalname: name, youtubeUrl, tiktokUrl, facebookUrl, points }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -380,6 +393,32 @@ export default function Profile() {
         setYoutubeUrl('');
         setTiktokUrl('');
         setFacebookUrl('');
+        setEditMediaPoints(0);
+      } else {
+        setError(data.message);
+      }
+    } catch (err) {
+      setError('Erreur serveur. Veuillez réessayer.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetMediaPoints = async (mediaId) => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch(`${API_URL}/media/${mediaId}/points`, {
+        method: 'PUT',
+        headers: { Authorization: token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points: 0 }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMyMedias(prev => prev.map(m => (m._id === mediaId ? { ...m, points: 0 } : m)));
+        setFeed(prev => prev.map(m => (m._id === mediaId ? { ...m, points: 0 } : m)));
+        setSuccess('Points du média réinitialisés !');
       } else {
         setError(data.message);
       }
@@ -473,7 +512,6 @@ export default function Profile() {
         const actionUrl = data.actionUrl;
         const newWindow = window.open(actionUrl, '_blank');
         if (newWindow) {
-          // Simuler la validation après un délai (par exemple, 60s pour une vue)
           setTimeout(async () => {
             try {
               const validateRes = await fetch(`${API_URL}/validate-action/${actionUrl.split('actionToken=')[1]}`, {
@@ -484,13 +522,15 @@ export default function Profile() {
               if (validateRes.ok) {
                 setPoints(validateData.points);
                 setSuccess(`Action ${actionType} validée ! +${actionType === 'follow' ? 100 : 50} points`);
+                setFeed(prev => prev.map(m => m._id === mediaId ? { ...m, points: validateData.mediaPoints } : m));
+                setMyMedias(prev => prev.map(m => m._id === mediaId ? { ...m, points: validateData.mediaPoints } : m));
               } else {
                 setError(validateData.message);
               }
             } catch (err) {
               setError('Erreur lors de la validation de l’action.');
             }
-          }, actionType === 'view' ? 60000 : 5000); // 60s pour view, 5s pour like/follow
+          }, actionType === 'view' ? 60000 : 5000);
         } else {
           setError('Veuillez autoriser les pop-ups pour effectuer cette action.');
         }
@@ -527,6 +567,7 @@ export default function Profile() {
         <div className="card-body">
           <h5 className="card-title">{media.originalname}</h5>
           <p className="card-text">Par : {media.owner?.username || media.owner?.email}</p>
+          <p className="card-text"><FaCoins /> Points restants : {media.points} FCFA</p>
           {media.filename && (
             isImage ? (
               <img src={media.filename} alt={media.originalname} className="img-fluid" />
@@ -616,15 +657,22 @@ export default function Profile() {
                   setYoutubeUrl(media.youtubeUrl || '');
                   setTiktokUrl(media.tiktokUrl || '');
                   setFacebookUrl(media.facebookUrl || '');
+                  setEditMediaPoints(media.points || 0);
                 }}
               >
                 <FaEdit /> Modifier
               </button>
               <button
-                className="btn btn-danger btn-sm"
+                className="btn btn-danger btn-sm mr-2"
                 onClick={() => handleDeleteMedia(media._id)}
               >
                 <FaTrash /> Supprimer
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleResetMediaPoints(media._id)}
+              >
+                <FaCoins /> Réinitialiser points
               </button>
             </div>
           )}
@@ -957,6 +1005,17 @@ export default function Profile() {
               />
             </div>
             <div className="mb-3">
+              <label className="form-label">Points du média (FCFA)</label>
+              <input
+                type="number"
+                className="form-control"
+                value={mediaPoints}
+                onChange={e => setMediaPoints(Number(e.target.value))}
+                min="0"
+                required
+              />
+            </div>
+            <div className="mb-3">
               <label className="form-label">Fichier média</label>
               <input
                 type="file"
@@ -1011,6 +1070,14 @@ export default function Profile() {
                     placeholder="Nouveau nom"
                   />
                   <input
+                    type="number"
+                    className="form-control mb-2"
+                    value={editMediaPoints}
+                    onChange={e => setEditMediaPoints(Number(e.target.value))}
+                    placeholder="Points du média (FCFA)"
+                    min="0"
+                  />
+                  <input
                     type="text"
                     className="form-control mb-2"
                     value={youtubeUrl}
@@ -1033,7 +1100,7 @@ export default function Profile() {
                   />
                   <button
                     className="btn btn-success btn-sm mr-2"
-                    onClick={() => handleEditMedia(media._id, newName, youtubeUrl, tiktokUrl, facebookUrl)}
+                    onClick={() => handleEditMedia(media._id, newName, youtubeUrl, tiktokUrl, facebookUrl, editMediaPoints)}
                     disabled={loading}
                   >
                     <FaSave /> Enregistrer
@@ -1046,6 +1113,7 @@ export default function Profile() {
                       setYoutubeUrl('');
                       setTiktokUrl('');
                       setFacebookUrl('');
+                      setEditMediaPoints(0);
                     }}
                   >
                     <FaTimes /> Annuler
