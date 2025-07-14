@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -68,6 +67,12 @@ const userSchema = new mongoose.Schema({
   pushSubscription: { type: Object },
   profilePicture: { type: String, default: '' },
   points: { type: Number, default: 100 },
+  dailyActions: {
+    likes: { type: Number, default: 0 },
+    views: { type: Number, default: 0 },
+    follows: { type: Number, default: 0 },
+    lastReset: { type: Date, default: Date.now },
+  },
 });
 const User = mongoose.model('User', userSchema);
 
@@ -75,11 +80,8 @@ const User = mongoose.model('User', userSchema);
 const mediaSchema = new mongoose.Schema({
   filename: { type: String, required: false },
   youtubeUrl: { type: String, required: false },
-  youtubeOptions: {
-    autoplay: { type: Boolean, default: false },
-    muted: { type: Boolean, default: true },
-    subtitles: { type: Boolean, default: false },
-  },
+  tiktokUrl: { type: String, required: false },
+  facebookUrl: { type: String, required: false },
   originalname: { type: String, required: true },
   uploadedAt: { type: Date, default: Date.now },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -96,6 +98,18 @@ const mediaSchema = new mongoose.Schema({
   ],
 });
 const Media = mongoose.model('Media', mediaSchema);
+
+// Schéma pour les actions
+const actionSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  media: { type: mongoose.Schema.Types.ObjectId, ref: 'Media', required: true },
+  actionType: { type: String, enum: ['like', 'view', 'follow'], required: true },
+  platform: { type: String, enum: ['youtube', 'tiktok', 'facebook'], required: true },
+  token: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now, expires: '1h' }, // Expire après 1 heure
+  validated: { type: Boolean, default: false },
+});
+const Action = mongoose.model('Action', actionSchema);
 
 // Configuration Nodemailer pour l'envoi d'emails
 const transporter = nodemailer.createTransport({
@@ -184,6 +198,16 @@ const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// Réinitialisation des limites quotidiennes
+const resetDailyActions = async (user) => {
+  const now = new Date();
+  const lastReset = new Date(user.dailyActions.lastReset);
+  if (now.getDate() !== lastReset.getDate() || now.getMonth() !== lastReset.getMonth() || now.getFullYear() !== lastReset.getFullYear()) {
+    user.dailyActions = { likes: 0, views: 0, follows: 0, lastReset: now };
+    await user.save();
+  }
+};
+
 // WebSocket : Gestion des connexions avec authentification
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
@@ -234,13 +258,21 @@ app.get('/media/:id', async (req, res) => {
     }
 
     const isYouTube = !!media.youtubeUrl;
-    const mediaUrl = isYouTube ? media.youtubeUrl : `${req.protocol}://${req.get('host')}/uploads/${media.filename}`;
+    const isTikTok = !!media.tiktokUrl;
+    const isFacebook = !!media.facebookUrl;
+    const mediaUrl = isYouTube
+      ? media.youtubeUrl
+      : isTikTok
+      ? media.tiktokUrl
+      : isFacebook
+      ? media.facebookUrl
+      : `${req.protocol}://${req.get('host')}/uploads/${media.filename}`;
     const pageUrl = `${req.protocol}://${req.get('host')}/media/${media._id}`;
     const title = media.originalname || 'Média sur Pixels Media';
     const description = media.owner?.whatsappMessage || 'Découvrez ce contenu sur Pixels Media !';
-    const isImage = !isYouTube && media.filename?.match(/\.(jpg|jpeg|png|gif)$/i);
-    const ogType = isYouTube ? 'video' : isImage ? 'image' : 'video';
-    const twitterCard = isYouTube ? 'player' : isImage ? 'summary_large_image' : 'player';
+    const isImage = !isYouTube && !isTikTok && !isFacebook && media.filename?.match(/\.(jpg|jpeg|png|gif)$/i);
+    const ogType = isYouTube || isTikTok || isFacebook ? 'video' : isImage ? 'image' : 'video';
+    const twitterCard = isYouTube || isTikTok || isFacebook ? 'player' : isImage ? 'summary_large_image' : 'player';
 
     res.send(`
       <!DOCTYPE html>
@@ -260,6 +292,15 @@ app.get('/media/:id', async (req, res) => {
           <meta name="twitter:player" content="${mediaUrl}">
           <meta name="twitter:player:width" content="1280">
           <meta name="twitter:player:height" content="720">
+          <meta property="og:image" content="https://img.youtube.com/vi/${media.youtubeUrl.split('v=')[1]?.split('&')[0]}/hqdefault.jpg">
+        ` : isTikTok ? `
+          <meta property="og:video" content="${mediaUrl}">
+          <meta property="og:video:type" content="text/html">
+          <meta name="twitter:player" content="${mediaUrl}">
+        ` : isFacebook ? `
+          <meta property="og:video" content="${mediaUrl}">
+          <meta property="og:video:type" content="text/html">
+          <meta name="twitter:player" content="${mediaUrl}">
         ` : isImage ? `
           <meta property="og:image" content="${mediaUrl}">
           <meta property="og:image:alt" content="${title}">
@@ -296,7 +337,7 @@ app.get('/media/:id', async (req, res) => {
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
           }
-          .youtube-iframe {
+          .external-video {
             width: 100%;
             aspect-ratio: 16/9;
           }
@@ -331,13 +372,11 @@ app.get('/media/:id', async (req, res) => {
           <h1>${title}</h1>
           <p>Par : ${media.owner?.username || media.owner?.email || 'Utilisateur inconnu'}</p>
           ${isYouTube ? `
-            <iframe 
-              src="${mediaUrl}${media.youtubeOptions?.autoplay ? '&autoplay=1' : ''}${media.youtubeOptions?.muted ? '&mute=1' : ''}${media.youtubeOptions?.subtitles ? '&cc_load_policy=1' : ''}" 
-              class="youtube-iframe media-content" 
-              frameborder="0" 
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-              allowfullscreen>
-            </iframe>
+            <a href="${mediaUrl}" target="_blank" class="external-video media-content">Voir sur YouTube</a>
+          ` : isTikTok ? `
+            <a href="${mediaUrl}" target="_blank" class="external-video media-content">Voir sur TikTok</a>
+          ` : isFacebook ? `
+            <a href="${mediaUrl}" target="_blank" class="external-video media-content">Voir sur Facebook</a>
           ` : isImage ? `
             <img src="${mediaUrl}" alt="${title}" class="media-content">
           ` : `
@@ -637,40 +676,65 @@ app.put('/profile', verifyToken, uploadProfile.single('profilePicture'), async (
   }
 });
 
-// Route pour uploader un fichier local
-app.post('/upload/local', verifyToken, upload.single('media'), async (req, res) => {
-  const { originalname } = req.body;
+// Route pour uploader un média (local, YouTube, TikTok, ou Facebook)
+app.post('/upload', verifyToken, upload.single('media'), async (req, res) => {
+  const { originalname, youtubeUrl, tiktokUrl, facebookUrl } = req.body;
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    if (!req.file) {
-      return res.status(400).json({ message: 'Aucun fichier fourni' });
-    }
     if (!originalname || !originalname.trim()) {
       return res.status(400).json({ message: 'Le nom du média est requis' });
     }
 
-    const media = await Media.create({
-      filename: req.file.filename,
-      youtubeUrl: null,
-      youtubeOptions: null,
+    if (!req.file && !youtubeUrl && !tiktokUrl && !facebookUrl) {
+      return res.status(400).json({ message: 'Veuillez fournir un fichier ou une URL (YouTube, TikTok, ou Facebook)' });
+    }
+
+    if (youtubeUrl) {
+      const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=|embed\/|v\/|.+\?v=)?([^&=%\?]{11})/;
+      if (!youtubeRegex.test(youtubeUrl)) {
+        return res.status(400).json({ message: 'URL YouTube invalide' });
+      }
+    }
+
+    if (tiktokUrl) {
+      const tiktokRegex = /^(https?:\/\/)?(www\.)?(tiktok\.com)\/.+$/;
+      if (!tiktokRegex.test(tiktokUrl)) {
+        return res.status(400).json({ message: 'URL TikTok invalide' });
+      }
+    }
+
+    if (facebookUrl) {
+      const facebookRegex = /^(https?:\/\/)?(www\.)?(facebook\.com|fb\.com)\/.+$/;
+      if (!facebookRegex.test(facebookUrl)) {
+        return res.status(400).json({ message: 'URL Facebook invalide' });
+      }
+    }
+
+    const mediaData = {
+      filename: req.file ? req.file.filename : null,
+      youtubeUrl: youtubeUrl || null,
+      tiktokUrl: tiktokUrl || null,
+      facebookUrl: facebookUrl || null,
       originalname: originalname.trim(),
       owner: req.user.userId,
       likes: [],
       dislikes: [],
       views: [],
       comments: [],
-    });
+    };
 
+    const media = await Media.create(mediaData);
     const populatedMedia = await Media.findById(media._id)
       .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
       .lean();
 
     res.status(201).json({
-      message: 'Fichier local uploadé',
+      message: 'Média uploadé',
       media: {
         ...populatedMedia,
+        filename: populatedMedia.filename ? `${req.protocol}://${req.get('host')}/uploads/${populatedMedia.filename}` : null,
         owner: {
           ...populatedMedia.owner,
           profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
@@ -681,6 +745,7 @@ app.post('/upload/local', verifyToken, upload.single('media'), async (req, res) 
     io.to(user._id.toString()).emit('newMedia', {
       media: {
         ...populatedMedia,
+        filename: populatedMedia.filename ? `${req.protocol}://${req.get('host')}/uploads/${populatedMedia.filename}` : null,
         owner: {
           ...populatedMedia.owner,
           profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
@@ -689,73 +754,94 @@ app.post('/upload/local', verifyToken, upload.single('media'), async (req, res) 
       owner: user
     });
   } catch (error) {
-    console.error('Erreur /upload/local:', error);
+    console.error('Erreur /upload:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
-// Route pour uploader une URL YouTube
-app.post('/upload/youtube', verifyToken, async (req, res) => {
-  const { youtubeUrl, originalname, autoplay, muted, subtitles } = req.body;
+// Route pour initier une action (like, view, follow)
+app.post('/action/:mediaId/:actionType/:platform', verifyToken, async (req, res) => {
+  const { mediaId, actionType, platform } = req.params;
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
 
-    if (!youtubeUrl) {
-      return res.status(400).json({ message: 'URL YouTube requise' });
-    }
-    if (!originalname || !originalname.trim()) {
-      return res.status(400).json({ message: 'Le nom du média est requis' });
+    await resetDailyActions(user);
+
+    const media = await Media.findById(mediaId);
+    if (!media) return res.status(404).json({ message: 'Média non trouvé' });
+
+    const platformField = platform === 'youtube' ? 'youtubeUrl' : platform === 'tiktok' ? 'tiktokUrl' : 'facebookUrl';
+    if (!media[platformField]) return res.status(400).json({ message: `Aucun URL ${platform} pour ce média` });
+
+    // Vérification des limites quotidiennes
+    const dailyLimits = { likes: 10, views: 10, follows: 5 };
+    if (user.dailyActions[actionType + 's'] >= dailyLimits[actionType + 's']) {
+      return res.status(403).json({ message: `Limite quotidienne de ${actionType}s atteinte` });
     }
 
-    const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=|embed\/|v\/|.+\?v=)?([^&=%\?]{11})/;
-    if (!youtubeRegex.test(youtubeUrl)) {
-      return res.status(400).json({ message: 'URL YouTube invalide' });
+    // Vérification si l'action a déjà été effectuée
+    const existingAction = await Action.findOne({
+      user: req.user.userId,
+      media: mediaId,
+      actionType,
+      platform,
+      validated: true,
+    });
+    if (existingAction) {
+      return res.status(400).json({ message: `Vous avez déjà effectué cette action (${actionType}) sur ce média pour ${platform}` });
     }
 
-    const media = await Media.create({
-      filename: null,
-      youtubeUrl,
-      youtubeOptions: {
-        autoplay: autoplay === 'true',
-        muted: muted === 'true',
-        subtitles: subtitles === 'true'
-      },
-      originalname: originalname.trim(),
-      owner: req.user.userId,
-      likes: [],
-      dislikes: [],
-      views: [],
-      comments: [],
+    // Générer un token temporaire pour l'action
+    const actionToken = crypto.randomBytes(16).toString('hex');
+    await Action.create({
+      user: req.user.userId,
+      media: mediaId,
+      actionType,
+      platform,
+      token: actionToken,
+      validated: false,
     });
 
-    const populatedMedia = await Media.findById(media._id)
-      .populate('owner', 'email username whatsappNumber whatsappMessage profilePicture')
-      .lean();
-
-    res.status(201).json({
-      message: 'URL YouTube uploadée',
-      media: {
-        ...populatedMedia,
-        owner: {
-          ...populatedMedia.owner,
-          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
-        }
-      }
-    });
-
-    io.to(user._id.toString()).emit('newMedia', {
-      media: {
-        ...populatedMedia,
-        owner: {
-          ...populatedMedia.owner,
-          profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
-        }
-      },
-      owner: user
-    });
+    // Ajouter le token à l'URL
+    const actionUrl = `${media[platformField]}?actionToken=${actionToken}`;
+    res.json({ message: 'Action initiée', actionUrl });
   } catch (error) {
-    console.error('Erreur /upload/youtube:', error);
+    console.error(`Erreur /action/${mediaId}/${actionType}/${platform}:`, error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// Route pour valider une action
+app.post('/validate-action/:token', verifyToken, async (req, res) => {
+  const { token } = req.params;
+  try {
+    const action = await Action.findOne({ token, user: req.user.userId });
+    if (!action) return res.status(404).json({ message: 'Action non trouvée ou invalide' });
+    if (action.validated) return res.status(400).json({ message: 'Action déjà validée' });
+
+    const user = await User.findById(req.user.userId);
+    await resetDailyActions(user);
+
+    // Simulation de la validation (dans un scénario réel, utiliser l'API de la plateforme)
+    // Ici, nous supposons que l'action est validée après un délai (par exemple, 60s pour une vue)
+    const now = new Date();
+    const actionAge = (now - new Date(action.createdAt)) / 1000;
+    if (action.actionType === 'view' && actionAge < 60) {
+      return res.status(400).json({ message: 'Vous devez regarder la vidéo pendant au moins 60 secondes' });
+    }
+
+    // Attribuer les points
+    const pointsMap = { like: 50, view: 50, follow: 100 };
+    user.points += pointsMap[action.actionType];
+    user.dailyActions[action.actionType + 's'] += 1;
+    action.validated = true;
+    await Promise.all([user.save(), action.save()]);
+
+    res.json({ message: 'Action validée', points: user.points });
+    io.to(user._id.toString()).emit('pointsUpdate', { points: user.points });
+  } catch (error) {
+    console.error('Erreur /validate-action:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
@@ -775,6 +861,7 @@ app.get('/feed', verifyToken, async (req, res) => {
 
     const mediasWithLikes = medias.map(media => ({
       ...media,
+      filename: media.filename ? `${req.protocol}://${req.get('host')}/uploads/${media.filename}` : null,
       likesCount: Array.isArray(media.likes) ? media.likes.length : 0,
       dislikesCount: Array.isArray(media.dislikes) ? media.dislikes.length : 0,
       viewsCount: Array.isArray(media.views) ? media.views.length : 0,
@@ -844,15 +931,12 @@ app.post('/follow', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-    if (user.points < 50) return res.status(403).json({ message: 'Solde insuffisant (50 FCFA requis)' });
 
     if (user.following.includes(followingId)) {
       return res.status(400).json({ message: 'Déjà abonné à cet utilisateur' });
     }
 
     user.following.push(followingId);
-    user.points -= 50;
-    if (user.points < 0) return res.status(403).json({ message: 'Points négatifs non autorisés' });
     await user.save();
 
     res.json({ message: 'Abonnement effectué', points: user.points });
@@ -890,7 +974,9 @@ app.get('/my-medias', verifyToken, async (req, res) => {
     res.json(list.map(media => ({
       ...media,
       filename: media.filename ? `${req.protocol}://${req.get('host')}/uploads/${media.filename}` : null,
-      youtubeUrl: media.youtubeUrl || null
+      youtubeUrl: media.youtubeUrl || null,
+      tiktokUrl: media.tiktokUrl || null,
+      facebookUrl: media.facebookUrl || null
     })) || []);
   } catch (error) {
     console.error('Erreur /my-medias:', error);
@@ -905,7 +991,7 @@ app.put('/media/:id', verifyToken, async (req, res) => {
     if (!media || media.owner.toString() !== req.user.userId)
       return res.status(403).json({ message: 'Non autorisé' });
 
-    const { originalname, youtubeUrl, autoplay, muted, subtitles } = req.body;
+    const { originalname, youtubeUrl, tiktokUrl, facebookUrl } = req.body;
     if (!originalname || !originalname.trim()) {
       return res.status(400).json({ message: 'Le nom du média est requis' });
     }
@@ -917,15 +1003,24 @@ app.put('/media/:id', verifyToken, async (req, res) => {
       }
     }
 
-    media.originalname = originalname.trim();
-    if (youtubeUrl) {
-      media.youtubeUrl = youtubeUrl;
-      media.youtubeOptions = {
-        autoplay: autoplay === 'true',
-        muted: muted === 'true',
-        subtitles: subtitles === 'true'
-      };
+    if (tiktokUrl) {
+      const tiktokRegex = /^(https?:\/\/)?(www\.)?(tiktok\.com)\/.+$/;
+      if (!tiktokRegex.test(tiktokUrl)) {
+        return res.status(400).json({ message: 'URL TikTok invalide' });
+      }
     }
+
+    if (facebookUrl) {
+      const facebookRegex = /^(https?:\/\/)?(www\.)?(facebook\.com|fb\.com)\/.+$/;
+      if (!facebookRegex.test(facebookUrl)) {
+        return res.status(400).json({ message: 'URL Facebook invalide' });
+      }
+    }
+
+    media.originalname = originalname.trim();
+    media.youtubeUrl = youtubeUrl || null;
+    media.tiktokUrl = tiktokUrl || null;
+    media.facebookUrl = facebookUrl || null;
 
     await media.save();
     const populatedMedia = await Media.findById(req.params.id)
@@ -933,9 +1028,10 @@ app.put('/media/:id', verifyToken, async (req, res) => {
       .lean();
 
     res.json({
-      message: 'Nom mis à jour',
+      message: 'Média mis à jour',
       media: {
         ...populatedMedia,
+        filename: populatedMedia.filename ? `${req.protocol}://${req.get('host')}/uploads/${populatedMedia.filename}` : null,
         owner: {
           ...populatedMedia.owner,
           profilePicture: populatedMedia.owner.profilePicture ? `${req.protocol}://${req.get('host')}/uploads/profiles/${populatedMedia.owner.profilePicture}` : ''
@@ -979,7 +1075,6 @@ app.post('/like/:mediaId', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-    if (user.points < 10) return res.status(403).json({ message: 'Solde insuffisant (10 FCFA requis)' });
 
     const media = await Media.findById(req.params.mediaId);
     if (!media) return res.status(404).json({ message: 'Média non trouvé' });
@@ -990,17 +1085,14 @@ app.post('/like/:mediaId', verifyToken, async (req, res) => {
 
     media.likes.push(req.user.userId);
     media.dislikes = media.dislikes.filter(userId => userId.toString() !== req.user.userId);
-    user.points -= 10;
-    if (user.points < 0) return res.status(403).json({ message: 'Points négatifs non autorisés' });
-    await Promise.all([media.save(), user.save()]);
+    await media.save();
 
-    res.json({ message: 'Média aimé', likesCount: media.likes.length, dislikesCount: media.dislikes.length, points: user.points });
+    res.json({ message: 'Média aimé', likesCount: media.likes.length, dislikesCount: media.dislikes.length });
     io.to(media.owner.toString()).emit('likeUpdate', {
       mediaId: req.params.mediaId,
       likesCount: media.likes.length,
       dislikesCount: media.dislikes.length,
-      userId: req.user.userId,
-      points: user.points
+      userId: req.user.userId
     });
   } catch (error) {
     console.error('Erreur /like/:mediaId POST:', error);
@@ -1095,7 +1187,6 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
   try {
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) return res.status(403).json({ message: 'Veuillez vérifier votre email.' });
-    if (user.points < 25) return res.status(403).json({ message: 'Solde insuffisant (25 FCFA requis)' });
 
     const media = await Media.findById(req.params.mediaId)
       .populate('owner', 'email username whatsappNumber whatsappMessage pushSubscription profilePicture');
@@ -1122,9 +1213,7 @@ app.post('/comment/:mediaId', verifyToken, upload.single('media'), async (req, r
       createdAt: new Date(),
     };
     media.comments.push(newComment);
-    user.points -= 25;
-    if (user.points < 0) return res.status(403).json({ message: 'Points négatifs non autorisés' });
-    await Promise.all([media.save(), user.save()]);
+    await media.save();
 
     if (media.owner._id.toString() !== req.user.userId) {
       const mailOptions = {
@@ -1394,8 +1483,7 @@ app.post('/view/:mediaId', verifyToken, async (req, res) => {
     }
 
     media.views.push(req.user.userId);
-    user.points += 10;
-    await Promise.all([media.save(), user.save()]);
+    await media.save();
 
     res.json({ message: 'Vue enregistrée', points: user.points });
     io.to(req.user.userId).emit('viewUpdate', {
