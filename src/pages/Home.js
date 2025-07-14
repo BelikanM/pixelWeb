@@ -61,7 +61,7 @@ export default function Profile() {
   const [editMediaId, setEditMediaId] = useState(null);
   const [newName, setNewName] = useState('');
   const [editUsername, setEditUsername] = useState('');
-  const [activeTab, setActiveTab] = useState('profile');
+  const [activeTab, setActiveTab] = useState('feed');
   const [profilePicture, setProfilePicture] = useState('');
   const [selectedProfilePicture, setSelectedProfilePicture] = useState(null);
   const [diskUsage, setDiskUsage] = useState({ used: 0, total: 5 * 1024 * 1024 * 1024, remaining: 0 });
@@ -72,11 +72,10 @@ export default function Profile() {
   const [facebookUrl, setFacebookUrl] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [isMuted, setIsMuted] = useState(true); // Par défaut, muet pour compatibilité mobile
+  const [isMuted, setIsMuted] = useState(true);
   const videoRefs = useRef(new Map());
   const navigate = useNavigate();
 
-  // Convertir l'URL YouTube en format intégrable
   const getYouTubeEmbedUrl = (url) => {
     if (!url) return null;
     try {
@@ -210,7 +209,7 @@ export default function Profile() {
       });
       const data = await res.json();
       if (res.ok) {
-        const total = 5 * 1024 * 1024 * 1024; // 5 GB
+        const total = 5 * 1024 * 1024 * 1024;
         setDiskUsage({ used: data.used, total, remaining: total - data.used });
       } else {
         setError(data.message || 'Erreur lors du calcul de l’espace disque');
@@ -1172,46 +1171,13 @@ export default function Profile() {
           ></button>
         </div>
       )}
-      <nav className="navbar navbar-dark bg-dark fixed-top">
-        <div className="container-fluid">
-          <Link className="navbar-brand" to="/">
-            Pixels Media
-          </Link>
-          <div className="d-flex align-items-center">
-            <span className="text-white me-3">
-              <FaUser /> {username} ({points} FCFA)
-            </span>
-            <button className="btn btn-danger btn-sm" onClick={handleLogout}>
-              <FaSignOutAlt /> Déconnexion
-            </button>
-          </div>
-        </div>
-      </nav>
+      <div className="d-flex justify-content-end align-items-center p-2">
+        <span className="text-white me-3">{points} FCFA</span>
+        <button className="btn btn-danger btn-sm" onClick={handleLogout}>
+          <FaSignOutAlt /> Déconnexion
+        </button>
+      </div>
       <ul className="nav nav-tabs mt-5">
-        <li className="nav-item">
-          <button
-            className={`nav-link ${activeTab === 'profile' ? 'active' : ''}`}
-            onClick={() => setActiveTab('profile')}
-          >
-            Profil
-          </button>
-        </li>
-        <li className="nav-item">
-          <button
-            className={`nav-link ${activeTab === 'users' ? 'active' : ''}`}
-            onClick={() => setActiveTab('users')}
-          >
-            Utilisateurs
-          </button>
-        </li>
-        <li className="nav-item">
-          <button
-            className={`nav-link ${activeTab === 'follows' ? 'active' : ''}`}
-            onClick={() => setActiveTab('follows')}
-          >
-            Abonnements
-          </button>
-        </li>
         <li className="nav-item">
           <button
             className={`nav-link ${activeTab === 'feed' ? 'active' : ''}`}
@@ -1220,197 +1186,7 @@ export default function Profile() {
             Fil
           </button>
         </li>
-        <li className="nav-item">
-          <button
-            className={`nav-link ${activeTab === 'myMedias' ? 'active' : ''}`}
-            onClick={() => setActiveTab('myMedias')}
-          >
-            Mes médias
-          </button>
-        </li>
-        <li className="nav-item">
-          <button
-            className={`nav-link ${activeTab === 'disk' ? 'active' : ''}`}
-            onClick={() => setActiveTab('disk')}
-          >
-            Espace disque
-          </button>
-        </li>
       </ul>
-
-      {activeTab === 'profile' && (
-        <div className="container mt-4">
-          <h3 className="text-white">Modifier le profil</h3>
-          <form onSubmit={handleUpdateProfile}>
-            <div className="mb-3">
-              <label className="form-label text-white">Nom d'utilisateur</label>
-              <input
-                type="text"
-                className="form-control"
-                value={editUsername}
-                onChange={(e) => setEditUsername(e.target.value)}
-                required
-              />
-            </div>
-            <div className="mb-3">
-              <label className="form-label text-white">Numéro WhatsApp</label>
-              <input
-                type="text"
-                className="form-control"
-                value={whatsappNumber}
-                onChange={(e) => setWhatsappNumber(e.target.value)}
-              />
-            </div>
-            <div className="mb-3">
-              <label className="form-label text-white">Message WhatsApp par défaut</label>
-              <input
-                type="text"
-                className="form-control"
-                value={whatsappMessage}
-                onChange={(e) => setWhatsappMessage(e.target.value)}
-              />
-            </div>
-            <div className="mb-3">
-              <label className="form-label text-white">Photo de profil</label>
-              <input
-                type="file"
-                className="form-control"
-                accept="image/*"
-                onChange={(e) => setSelectedProfilePicture(e.target.files[0])}
-              />
-              {profilePicture && (
-                <img
-                  src={profilePicture}
-                  alt="Profil"
-                  className="img-fluid mt-2"
-                  style={{ maxWidth: '100px' }}
-                  onError={() => setError('Erreur de chargement de la photo de profil')}
-                />
-              )}
-            </div>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? (
-                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-              ) : (
-                'Mettre à jour'
-              )}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {activeTab === 'users' && (
-        <div className="container mt-4">
-          <h3 className="text-white">Rechercher des utilisateurs</h3>
-          <input
-            type="text"
-            className="form-control mb-3"
-            placeholder="Rechercher par email ou nom d'utilisateur"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <ul className="list-group">
-            {users.map((user) => (
-              <li
-                key={user._id}
-                className="list-group-item d-flex justify-content-between align-items-center bg-dark text-white"
-              >
-                <div className="d-flex align-items-center">
-                  {user.profilePicture ? (
-                    <img
-                      src={user.profilePicture}
-                      alt={user.username}
-                      className="rounded-circle me-2"
-                      style={{ width: '40px', height: '40px', objectFit: 'cover' }}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'inline';
-                      }}
-                    />
-                  ) : (
-                    <FaUser className="me-2" style={{ fontSize: '40px' }} />
-                  )}
-                  {user.username} ({user.email})
-                </div>
-                {follows.some((f) => f._id === user._id) ? (
-                  <button
-                    className="btn btn-outline-danger btn-sm"
-                    onClick={() => handleUnfollow(user._id)}
-                    disabled={loading}
-                    aria-label={`Se désabonner de ${user.username}`}
-                  >
-                    {loading ? (
-                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                    ) : (
-                      <FaUserCheck />
-                    )}
-                    Se désabonner
-                  </button>
-                ) : (
-                  <button
-                    className="btn btn-outline-primary btn-sm"
-                    onClick={() => handleFollow(user._id)}
-                    disabled={loading}
-                    aria-label={`Suivre ${user.username}`}
-                  >
-                    {loading ? (
-                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                    ) : (
-                      <FaUserPlus />
-                    )}
-                    S’abonner
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {activeTab === 'follows' && (
-        <div className="container mt-4">
-          <h3 className="text-white">Mes abonnements</h3>
-          <ul className="list-group">
-            {follows.map((user) => (
-              <li
-                key={user._id}
-                className="list-group-item d-flex justify-content-between align-items-center bg-dark text-white"
-              >
-                <div className="d-flex align-items-center">
-                  {user.profilePicture ? (
-                    <img
-                      src={user.profilePicture}
-                      alt={user.username}
-                      className="rounded-circle me-2"
-                      style={{ width: '40px', height: '40px', objectFit: 'cover' }}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'inline';
-                      }}
-                    />
-                  ) : (
-                    <FaUser className="me-2" style={{ fontSize: '40px' }} />
-                  )}
-                  {user.username} ({user.email})
-                </div>
-                <button
-                  className="btn btn-outline-danger btn-sm"
-                  onClick={() => handleUnfollow(user._id)}
-                  disabled={loading}
-                  aria-label={`Se désabonner de ${user.username}`}
-                >
-                  {loading ? (
-                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                  ) : (
-                    <FaUserCheck />
-                  )}
-                  Se désabonner
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {activeTab === 'feed' && (
         <div className="tiktok-feed">
@@ -1423,146 +1199,6 @@ export default function Profile() {
           ) : (
             feed.map((media) => renderMedia(media))
           )}
-        </div>
-      )}
-
-      {activeTab === 'myMedias' && (
-        <div className="container mt-4">
-          <h3 className="text-white">Mes médias</h3>
-          <form onSubmit={handleUpload}>
-            <div className="mb-3">
-              <label className="form-label text-white">Nom du média</label>
-              <input
-                type="text"
-                className="form-control"
-                value={mediaName}
-                onChange={(e) => setMediaName(e.target.value)}
-                required
-              />
-            </div>
-            <div className="mb-3">
-              <label className="form-label text-white">Fichier média</label>
-              <input
-                type="file"
-                className="form-control"
-                accept="image/*,video/*"
-                onChange={(e) => setFile(e.target.files[0])}
-              />
-            </div>
-            <div className="mb-3">
-              <label className="form-label text-white">URL YouTube</label>
-              <input
-                type="text"
-                className="form-control"
-                value={youtubeUrl}
-                onChange={(e) => setYoutubeUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
-              />
-            </div>
-            <div className="mb-3">
-              <label className="form-label text-white">URL TikTok</label>
-              <input
-                type="text"
-                className="form-control"
-                value={tiktokUrl}
-                onChange={(e) => setTiktokUrl(e.target.value)}
-                placeholder="https://www.tiktok.com/..."
-              />
-            </div>
-            <div className="mb-3">
-              <label className="form-label text-white">URL Facebook</label>
-              <input
-                type="text"
-                className="form-control"
-                value={facebookUrl}
-                onChange={(e) => setFacebookUrl(e.target.value)}
-                placeholder="https://www.facebook.com/..."
-              />
-            </div>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? (
-                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-              ) : (
-                <>
-                  <FaUpload /> Uploader
-                </>
-              )}
-            </button>
-          </form>
-          <div className="tiktok-feed">
-            {myMedias.length === 0 ? (
-              <div className="no-content">
-                <p className="text-muted">Vous n’avez aucun média. Uploadez-en un !</p>
-              </div>
-            ) : (
-              myMedias.map((media) =>
-                editMediaId === media._id ? (
-                  <div key={media._id} className="card mb-3 bg-dark text-white">
-                    <div className="card-body">
-                      <input
-                        type="text"
-                        className="form-control mb-2"
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        placeholder="Nouveau nom"
-                      />
-                      <input
-                        type="text"
-                        className="form-control mb-2"
-                        value={youtubeUrl}
-                        onChange={(e) => setYoutubeUrl(e.target.value)}
-                        placeholder="URL YouTube"
-                      />
-                      <input
-                        type="text"
-                        className="form-control mb-2"
-                        value={tiktokUrl}
-                        onChange={(e) => setTiktokUrl(e.target.value)}
-                        placeholder="URL TikTok"
-                      />
-                      <input
-                        type="text"
-                        className="form-control mb-2"
-                        value={facebookUrl}
-                        onChange={(e) => setFacebookUrl(e.target.value)}
-                        placeholder="URL Facebook"
-                      />
-                      <button
-                        className="btn btn-success btn-sm me-2"
-                        onClick={() => handleEditMedia(media._id, newName, youtubeUrl, tiktokUrl, facebookUrl)}
-                        disabled={loading}
-                      >
-                        <FaSave /> Enregistrer
-                      </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          setEditMediaId(null);
-                          setNewName('');
-                          setYoutubeUrl('');
-                          setTiktokUrl('');
-                          setFacebookUrl('');
-                        }}
-                      >
-                        <FaTimes /> Annuler
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  renderMedia(media, true)
-                )
-              )
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'disk' && (
-        <div className="container mt-4">
-          <h3 className="text-white">Espace disque</h3>
-          <p className="text-white">Utilisé : {formatSize(diskUsage.used)}</p>
-          <p className="text-white">Restant : {formatSize(diskUsage.remaining)}</p>
-          <p className="text-white">Total : {formatSize(diskUsage.total)}</p>
         </div>
       )}
     </div>
